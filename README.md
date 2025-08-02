@@ -1,2 +1,2 @@
 # 10k
-App en Streamlit para registrar hábitos diarios como comidas, sueño, puntualidad laboral y abstinencia de YouTube. Guarda los datos en MongoDB Atlas y los presenta en tablas interactivas
+App web para registrar sesiones de orden personal, usando cámara + detección IA (Roboflow) y guardado en MongoDB. Parte del proyecto de las 10.000 horas.
