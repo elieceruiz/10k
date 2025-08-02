@@ -3,71 +3,45 @@ import openai
 import base64
 import requests
 from datetime import datetime
+import time
 from pymongo import MongoClient
 
 # === CONFIG APP ===
-st.set_page_config(page_title="👁️ Visión 10K", layout="centered")
-st.title("👁️ Visión GPT-4o – Proyecto 10K")
+st.set_page_config(page_title="🧠 Proyecto 10K – Organización guiada", layout="centered")
+st.title("📸 Visión y Orden – Proyecto 10K")
 
 # === SECRETS ===
 openai.api_key = st.secrets["openai_api_key"]
-openai.organization = st.secrets["openai_org_id"]
 mongo_uri = st.secrets["mongo_uri"]
 
 # === CONEXIÓN MONGO ===
 client = MongoClient(mongo_uri)
 db = client["proyecto10k"]
-col = db["detecciones_10k"]
-
-# === CONSULTA DE SALDO OPENAI ===
-@st.cache_data(ttl=600)
-def get_credit_balance():
-    try:
-        headers = {
-            "Authorization": f"Bearer {openai.api_key}",
-            "OpenAI-Organization": openai.organization
-        }
-        url = "https://api.openai.com/v1/dashboard/billing/credit_grants"
-        response = requests.get(url, headers=headers)
-
-        if response.status_code == 200:
-            data = response.json()
-            saldo = data.get("total_available")
-            if saldo is not None:
-                return f"{saldo:.2f} USD"
-            else:
-                return "ℹ️ Saldo no disponible en la respuesta"
-        elif response.status_code == 401:
-            return "❌ API Key inválida o no autorizada"
-        elif response.status_code == 403:
-            return "🔒 No tenés acceso a la API de facturación"
-        else:
-            return f"⚠️ Error HTTP {response.status_code}"
-    except Exception as e:
-        return f"⚠️ Error general: {str(e)}"
+col = db["organizacion_guiada"]
 
 # === CARGA DE IMAGEN ===
-uploaded_file = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("📤 Sube una imagen del entorno a organizar", type=["jpg", "jpeg", "png"])
+
+# === NOMBRE USUARIO ===
+username = st.text_input("🧍 Tu nombre:", "eliecer")
 
 if uploaded_file:
     st.image(uploaded_file, caption="Imagen cargada", use_container_width=True)
-    username = st.text_input("🧍 Tu nombre (opcional):", "eliecer")
-
     bytes_data = uploaded_file.read()
     encoded_image = base64.b64encode(bytes_data).decode("utf-8")
     image_url = f"data:image/jpeg;base64,{encoded_image}"
 
-    # === GPT-4o LISTA OBJETOS ===
-    with st.spinner("Detectando objetos en la imagen..."):
+    # === GPT-4o DETECCIÓN ===
+    with st.spinner("🔍 Detectando objetos en la imagen..."):
         try:
             response = openai.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4o",
                 messages=[
-                    {"role": "system", "content": "Sos un asistente que detecta objetos en imágenes. Solo lista los objetos, sin contexto adicional."},
+                    {"role": "system", "content": "Detectá y listá objetos visibles. No describas. Solo nombrá los elementos visibles, separados por comas."},
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Enumera los objetos principales que aparecen en esta imagen, separados por comas. No des ninguna explicación ni contexto extra."},
+                            {"type": "text", "text": "Detectá objetos visibles en esta imagen y listalos, separados por comas."},
                             {"type": "image_url", "image_url": {"url": image_url}},
                         ],
                     },
@@ -75,52 +49,64 @@ if uploaded_file:
                 max_tokens=150,
             )
 
-            result = response.choices[0].message.content.strip()
-            tokens_utilizados = response.usage.total_tokens
+            resultado = response.choices[0].message.content.strip()
+            st.success("🎯 Objetos detectados:")
+            st.write(resultado)
 
-            st.success("🧠 Objetos detectados por IA:")
-            st.write(result)
-            st.info(f"🔢 Tokens usados en esta detección: {tokens_utilizados}")
+            objetos_detectados = [o.strip() for o in resultado.split(",") if o.strip()]
+            st.markdown(f"🔢 Total detectados: **{len(objetos_detectados)}**")
 
-            objetos = [obj.strip() for obj in result.split(",") if obj.strip()]
-            seleccionados = st.multiselect("✔️ ¿Cuáles objetos organizaste ya?", objetos)
+            if objetos_detectados:
+                orden_seleccionado = st.multiselect(
+                    "📋 Selecciona el orden en que querés organizarlos:",
+                    opciones := objetos_detectados,
+                    default=objetos_detectados,
+                    key="orden"
+                )
 
-            # === GUARDAR EN MONGO ===
-            doc = {
-                "usuario": username,
-                "fecha": datetime.utcnow(),
-                "objetos_detectados": objetos,
-                "objetos_organizados": seleccionados,
-                "nombre_imagen": uploaded_file.name,
-                "saldo_openai": get_credit_balance(),
-                "tokens_usados": tokens_utilizados
-            }
-            col.insert_one(doc)
-            st.info("✅ Registro guardado en MongoDB")
+                if len(orden_seleccionado) != len(objetos_detectados):
+                    st.warning("Debés seleccionar todos los objetos en el orden deseado.")
+                    st.stop()
 
+                st.divider()
+                st.markdown("### 🛠️ Módulo de organización paso a paso")
+
+                # === OBJETO ACTUAL A ORGANIZAR ===
+                paso = st.session_state.get("paso_actual", 0)
+                if paso < len(orden_seleccionado):
+                    objeto_actual = orden_seleccionado[paso]
+                    st.markdown(f"### 👉 Objeto {paso+1}/{len(orden_seleccionado)}: **{objeto_actual}**")
+
+                    if f"inicio_{objeto_actual}" not in st.session_state:
+                        st.session_state[f"inicio_{objeto_actual}"] = None
+
+                    # Iniciar cronómetro
+                    if st.session_state[f"inicio_{objeto_actual}"] is None:
+                        if st.button("⏱️ Iniciar organización"):
+                            st.session_state[f"inicio_{objeto_actual}"] = time.time()
+                    else:
+                        tiempo = int(time.time() - st.session_state[f"inicio_{objeto_actual}"])
+                        st.write(f"🕒 Tiempo transcurrido: {tiempo} segundos")
+
+                        lugar = st.text_input(f"📍 ¿Dónde quedará '{objeto_actual}' permanentemente?")
+                        if lugar:
+                            if st.button("✅ Registrar y pasar al siguiente"):
+                                doc = {
+                                    "usuario": username,
+                                    "fecha": datetime.utcnow(),
+                                    "objeto": objeto_actual,
+                                    "orden": paso + 1,
+                                    "lugar_asignado": lugar,
+                                    "tiempo_organizacion_segundos": tiempo,
+                                    "nombre_imagen": uploaded_file.name
+                                }
+                                col.insert_one(doc)
+                                st.success(f"📦 Objeto '{objeto_actual}' registrado con éxito.")
+                                st.session_state[f"inicio_{objeto_actual}"] = None
+                                st.session_state["paso_actual"] = paso + 1
+                                st.rerun()
+                else:
+                    st.balloons()
+                    st.success("🎉 Todos los objetos fueron organizados.")
         except Exception as e:
             st.error(f"❌ Error al analizar la imagen: {str(e)}")
-
-# === SALDO OPENAI + LINK ===
-st.divider()
-st.subheader("💳 Saldo en OpenAI:")
-saldo = get_credit_balance()
-st.write(saldo)
-st.markdown("🔗 [Consulta tu uso de tokens en OpenAI Platform](https://platform.openai.com/usage)")
-
-# === HISTORIAL DE REGISTROS ===
-st.divider()
-st.subheader("📚 Historial reciente:")
-
-registros = list(col.find().sort("fecha", -1))
-if registros:
-    for r in registros[:10]:
-        st.markdown(f"**🧍 Usuario:** {r.get('usuario', 'Desconocido')}")
-        st.markdown(f"🕒 **Fecha:** {r['fecha'].strftime('%Y-%m-%d %H:%M:%S')} UTC")
-        st.markdown(f"🧠 **Detectado:** {', '.join(r.get('objetos_detectados', []))}")
-        st.markdown(f"✔️ **Organizado:** {', '.join(r.get('objetos_organizados', []))}")
-        st.markdown(f"💳 **Saldo en ese momento:** {r.get('saldo_openai', 'N/A')}")
-        st.markdown(f"🔢 **Tokens usados:** {r.get('tokens_usados', 'N/A')}")
-        st.markdown("---")
-else:
-    st.info("No hay registros previos.")
