@@ -25,12 +25,14 @@ def get_credit_balance():
         headers = {"Authorization": f"Bearer {openai.api_key}"}
         url = "https://api.openai.com/v1/dashboard/billing/credit_grants"
         response = requests.get(url, headers=headers)
-        st.write("🔍 Status HTTP:", response.status_code)
 
         if response.status_code == 200:
             data = response.json()
-            st.write("🧾 Respuesta:", data)
-            return data.get("total_available", "No disponible")
+            saldo = data.get("total_available")
+            if saldo is not None:
+                return f"{saldo:.2f} USD"
+            else:
+                return "ℹ️ Saldo no disponible en la respuesta"
         elif response.status_code == 401:
             return "❌ API Key inválida o no autorizada"
         elif response.status_code == 403:
@@ -55,7 +57,7 @@ if uploaded_file:
     with st.spinner("Detectando objetos en la imagen..."):
         try:
             response = openai.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "Sos un asistente que detecta objetos en imágenes. Solo lista los objetos, sin contexto adicional."},
                     {
@@ -70,8 +72,11 @@ if uploaded_file:
             )
 
             result = response.choices[0].message.content.strip()
+            tokens_utilizados = response.usage.total_tokens
+
             st.success("🧠 Objetos detectados por IA:")
             st.write(result)
+            st.info(f"🔢 Tokens usados en esta detección: {tokens_utilizados}")
 
             # Procesar lista de objetos
             objetos = [obj.strip() for obj in result.split(",") if obj.strip()]
@@ -84,7 +89,8 @@ if uploaded_file:
                 "objetos_detectados": objetos,
                 "objetos_organizados": seleccionados,
                 "nombre_imagen": uploaded_file.name,
-                "saldo_openai": get_credit_balance()
+                "saldo_openai": get_credit_balance(),
+                "tokens_usados": tokens_utilizados
             }
             col.insert_one(doc)
             st.info("✅ Registro guardado en MongoDB")
@@ -96,11 +102,7 @@ if uploaded_file:
 st.divider()
 st.subheader("💳 Saldo en OpenAI:")
 saldo = get_credit_balance()
-if isinstance(saldo, float):
-    st.write(f"**{saldo:.2f} USD**")
-else:
-    st.warning(saldo)
-
+st.write(saldo)
 st.markdown("🔗 [Consulta tu uso de tokens en OpenAI Platform](https://platform.openai.com/usage)")
 
 # === HISTORIAL DE REGISTROS ===
@@ -114,29 +116,8 @@ if registros:
         st.markdown(f"🕒 **Fecha:** {r['fecha'].strftime('%Y-%m-%d %H:%M:%S')} UTC")
         st.markdown(f"🧠 **Detectado:** {', '.join(r.get('objetos_detectados', []))}")
         st.markdown(f"✔️ **Organizado:** {', '.join(r.get('objetos_organizados', []))}")
-        st.markdown(f"💳 **Saldo en ese momento:** {r.get('saldo_openai', 'N/A')} USD")
+        st.markdown(f"💳 **Saldo en ese momento:** {r.get('saldo_openai', 'N/A')}")
+        st.markdown(f"🔢 **Tokens usados:** {r.get('tokens_usados', 'N/A')}")
         st.markdown("---")
 else:
     st.info("No hay registros previos.")
-
-# === TEST DE API KEY ===
-st.divider()
-st.subheader("🧪 Test de conexión con OpenAI API")
-
-try:
-    headers = {"Authorization": f"Bearer {openai.api_key}"}
-    test_response = requests.get("https://api.openai.com/v1/models", headers=headers)
-
-    if test_response.status_code == 200:
-        st.success("✅ API Key válida y autorizada.")
-        modelos = [m["id"] for m in test_response.json().get("data", [])]
-        st.markdown("**📦 Modelos disponibles:**")
-        st.write(modelos)
-    elif test_response.status_code == 401:
-        st.error("❌ API Key inválida o sin permisos (HTTP 401).")
-    else:
-        st.warning(f"⚠️ Otro error HTTP {test_response.status_code}")
-        st.code(test_response.text)
-
-except Exception as e:
-    st.exception(e)
