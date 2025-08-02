@@ -119,3 +119,24 @@ if registros:
 else:
     st.info("No hay registros previos.")
 
+# === TEST DE API KEY ===
+st.divider()
+st.subheader("🧪 Test de conexión con OpenAI API")
+
+try:
+    headers = {"Authorization": f"Bearer {openai.api_key}"}
+    test_response = requests.get("https://api.openai.com/v1/models", headers=headers)
+
+    if test_response.status_code == 200:
+        st.success("✅ API Key válida y autorizada.")
+        modelos = [m["id"] for m in test_response.json().get("data", [])]
+        st.markdown("**📦 Modelos disponibles:**")
+        st.write(modelos)
+    elif test_response.status_code == 401:
+        st.error("❌ API Key inválida o sin permisos (HTTP 401).")
+    else:
+        st.warning(f"⚠️ Otro error HTTP {test_response.status_code}")
+        st.code(test_response.text)
+
+except Exception as e:
+    st.exception(e)
