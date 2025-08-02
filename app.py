@@ -26,13 +26,17 @@ def image_file_to_base64(image_file):
 
 # === Enviar imagen a Roboflow vía API REST ===
 def detectar_objetos_con_roboflow(image_file):
-    ROBOFLOW_API_KEY = os.environ.get("ROBOFLOW_API_KEY", "qXIUxBtKtvnZswM1FVoY")
-    MODEL_ID = os.environ.get("ROBOFLOW_MODEL_ID", "general-detector-4bvc4/1")
+    ROBOFLOW_API_KEY = os.environ.get("ROBOFLOW_API_KEY")
+    MODEL_ID = os.environ.get("ROBOFLOW_MODEL_ID")
     url = f"https://detect.roboflow.com/{MODEL_ID}?api_key={ROBOFLOW_API_KEY}"
 
     image_bytes = image_file.read()
     response = requests.post(url, files={"file": image_bytes})
     result = response.json()
+
+    # Mostrar el JSON por ahora para debug
+    # st.json(result)
+
     etiquetas = [pred["class"] for pred in result.get("predictions", [])]
     return list(set(etiquetas))
 
@@ -41,7 +45,7 @@ foto = st.camera_input("📸 Tomá una foto del espacio a ordenar")
 
 if foto:
     base64_img, img_pil = image_file_to_base64(foto)
-    st.image(img_pil, caption="Imagen capturada", use_column_width=True)
+    st.image(img_pil, caption="Imagen capturada", use_container_width=True)
 
     try:
         etiquetas = detectar_objetos_con_roboflow(foto)
