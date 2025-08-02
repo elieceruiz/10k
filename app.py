@@ -5,33 +5,43 @@ import requests
 from datetime import datetime
 from pymongo import MongoClient
 
-# === CONFIGURACIÓN DE LA APP ===
+# === CONFIGURACIÓN GENERAL ===
 st.set_page_config(page_title="👁️ Visión 10K", layout="centered")
 st.title("👁️ Visión GPT-4o – Proyecto 10K")
 
-# === CARGAR CREDENCIALES DESDE st.secrets ===
+# === CARGA DE SECRETOS DESDE STREAMLIT CLOUD ===
 openai.api_key = st.secrets["openai_api_key"]
 mongo_uri = st.secrets["mongo_uri"]
 
-# === CONECTAR A MONGO ===
+# === CONEXIÓN CON MONGO ===
 client = MongoClient(mongo_uri)
 db = client["proyecto10k"]
 col = db["detecciones_10k"]
 
-# === FUNCIÓN PARA CONSULTAR SALDO DE OPENAI ===
+# === FUNCIÓN PARA OBTENER SALDO (con logs) ===
 @st.cache_data(ttl=600)
 def get_credit_balance():
     try:
         headers = {"Authorization": f"Bearer {openai.api_key}"}
-        response = requests.get("https://api.openai.com/v1/dashboard/billing/credit_grants", headers=headers)
+        url = "https://api.openai.com/v1/dashboard/billing/credit_grants"
+        response = requests.get(url, headers=headers)
+
+        st.write("🔍 Status HTTP:", response.status_code)
+
         if response.status_code == 200:
             data = response.json()
+            st.write("🧾 Respuesta:", data)
             return data.get("total_available", "No disponible")
-        return "No disponible"
+        elif response.status_code == 401:
+            return "❌ API Key inválida o no autorizada"
+        elif response.status_code == 403:
+            return "🔒 No tenés acceso a la API de facturación"
+        else:
+            return f"⚠️ Error HTTP {response.status_code}"
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"⚠️ Error general: {str(e)}"
 
-# === CARGAR IMAGEN ===
+# === SUBIR IMAGEN ===
 uploaded_file = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
 
 if uploaded_file:
@@ -77,23 +87,26 @@ if uploaded_file:
         except Exception as e:
             st.error(f"❌ Error al analizar la imagen: {str(e)}")
 
-# === MOSTRAR SALDO DISPONIBLE ===
+# === MOSTRAR SALDO DE OPENAI CON MANEJO DE ERRORES ===
 st.divider()
-st.subheader("💳 Saldo restante en OpenAI:")
+st.subheader("💳 Saldo OpenAI actual:")
 saldo = get_credit_balance()
-st.write(f"**{saldo} USD**" if isinstance(saldo, float) else saldo)
+if isinstance(saldo, float):
+    st.write(f"**{saldo:.2f} USD**")
+else:
+    st.warning(f"{saldo}")
 
-# === MOSTRAR HISTORIAL DE REGISTROS ===
+# === HISTORIAL DESDE MONGO ===
 st.divider()
-st.subheader("📚 Historial de análisis anteriores:")
+st.subheader("📚 Últimos análisis:")
 
 registros = list(col.find().sort("fecha", -1))
 if registros:
-    for r in registros[:10]:  # Mostrar solo los últimos 10
+    for r in registros[:10]:
         st.markdown(f"**🧍 Usuario:** {r.get('usuario', 'Desconocido')}")
         st.markdown(f"🕒 **Fecha:** {r['fecha'].strftime('%Y-%m-%d %H:%M:%S')} UTC")
         st.markdown(f"📝 **Descripción:** {r['descripcion']}")
         st.markdown(f"💳 **Saldo en ese momento:** {r.get('saldo_openai', 'N/A')} USD")
         st.markdown("---")
 else:
-    st.info("No hay registros aún.")
+    st.info("No hay registros guardados aún.")
