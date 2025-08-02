@@ -34,7 +34,8 @@ def detectar_objetos_con_roboflow(image_file):
     response = requests.post(url, files={"file": image_bytes})
     result = response.json()
 
-    # Mostrar el JSON por ahora para debug
+    # DEBUG opcional (comentá si no lo usás)
+    # st.subheader("🛠 Respuesta completa de Roboflow")
     # st.json(result)
 
     etiquetas = [pred["class"] for pred in result.get("predictions", [])]
@@ -50,28 +51,32 @@ if foto:
     try:
         etiquetas = detectar_objetos_con_roboflow(foto)
 
-        st.markdown("### 🔍 Objetos detectados por IA")
-        objetos_trabajados = []
-        for etiqueta in etiquetas:
-            if len(objetos_trabajados) < 3 and st.checkbox(etiqueta, key=etiqueta):
-                destino = st.selectbox(
-                    f"¿Dónde fue '{etiqueta}'?",
-                    ["Ganchos", "Reciclaje", "Cajón tech", "Estante", "Donación", "Basura"],
-                    key=f"destino_{etiqueta}"
-                )
-                objetos_trabajados.append({"nombre": etiqueta, "destino": destino})
+        if etiquetas:
+            st.success(f"✅ {len(etiquetas)} objeto(s) detectado(s). Seleccioná hasta 3 para registrar:")
+            objetos_trabajados = []
+            for etiqueta in etiquetas:
+                if len(objetos_trabajados) < 3 and st.checkbox(etiqueta, key=etiqueta):
+                    destino = st.selectbox(
+                        f"¿Dónde fue '{etiqueta}'?",
+                        ["Ganchos", "Reciclaje", "Cajón tech", "Estante", "Donación", "Basura"],
+                        key=f"destino_{etiqueta}"
+                    )
+                    objetos_trabajados.append({"nombre": etiqueta, "destino": destino})
 
-        if st.button("💾 Guardar sesión"):
-            if objetos_trabajados:
-                doc = {
-                    "timestamp": datetime.utcnow(),
-                    "image_base64": base64_img,
-                    "objetos_detectados": etiquetas,
-                    "objetos_trabajados": objetos_trabajados
-                }
-                coleccion.insert_one(doc)
-                st.success("✅ Sesión registrada correctamente.")
-            else:
-                st.warning("Seleccioná al menos un objeto para registrar.")
+            if st.button("💾 Guardar sesión"):
+                if objetos_trabajados:
+                    doc = {
+                        "timestamp": datetime.utcnow(),
+                        "image_base64": base64_img,
+                        "objetos_detectados": etiquetas,
+                        "objetos_trabajados": objetos_trabajados
+                    }
+                    coleccion.insert_one(doc)
+                    st.success("🧾 Sesión registrada correctamente.")
+                else:
+                    st.warning("⚠️ Seleccioná al menos un objeto para registrar.")
+        else:
+            st.warning("🕵️‍♂️ No se detectaron objetos en la imagen. Probá otra foto con objetos más visibles o mejor iluminados.")
+
     except Exception as e:
         st.error(f"❌ Error al procesar la imagen: {e}")
