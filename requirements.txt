@@ -1,4 +1,4 @@
 streamlit
 pymongo
 Pillow
-inference_sdk
+requests
