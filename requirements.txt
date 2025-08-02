@@ -2,4 +2,3 @@ streamlit
 openai
 pymongo
 requests
-python-dotenv
