@@ -11,6 +11,7 @@ st.title("👁️ Visión GPT-4o – Proyecto 10K")
 
 # === SECRETS ===
 openai.api_key = st.secrets["openai_api_key"]
+openai.organization = st.secrets["openai_org_id"]
 mongo_uri = st.secrets["mongo_uri"]
 
 # === CONEXIÓN MONGO ===
@@ -22,7 +23,10 @@ col = db["detecciones_10k"]
 @st.cache_data(ttl=600)
 def get_credit_balance():
     try:
-        headers = {"Authorization": f"Bearer {openai.api_key}"}
+        headers = {
+            "Authorization": f"Bearer {openai.api_key}",
+            "OpenAI-Organization": openai.organization
+        }
         url = "https://api.openai.com/v1/dashboard/billing/credit_grants"
         response = requests.get(url, headers=headers)
 
@@ -78,7 +82,6 @@ if uploaded_file:
             st.write(result)
             st.info(f"🔢 Tokens usados en esta detección: {tokens_utilizados}")
 
-            # Procesar lista de objetos
             objetos = [obj.strip() for obj in result.split(",") if obj.strip()]
             seleccionados = st.multiselect("✔️ ¿Cuáles objetos organizaste ya?", objetos)
 
