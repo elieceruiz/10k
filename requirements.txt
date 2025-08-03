@@ -2,4 +2,4 @@ streamlit
 pymongo
 openai
 pillow
-python-dotenv
+pandas
