@@ -60,6 +60,10 @@ if uploaded_file:
                     st.success("✅ Objetos detectados:")
                     st.write(objetos)
 
+                    # ✅ LISTA CON CHECKBOXES DESHABILITADOS
+                    for i, obj in enumerate(objetos):
+                        st.checkbox(label=obj, key=f"chk_{i}", value=False, disabled=True)
+
                     # REGISTRO EN MONGO
                     doc = {
                         "timestamp": datetime.now(tz),
