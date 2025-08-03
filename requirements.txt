@@ -5,3 +5,4 @@ pillow
 python-dotenv
 pytz
 streamlit-javascript
+streamlit-webrtc
