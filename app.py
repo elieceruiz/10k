@@ -108,6 +108,10 @@ with tab_migracion:
         st.success(f"✅ Objetos detectados en {st.session_state.migracion_duracion} segundos")
         st.json(st.session_state.objetos_migracion)
 
+        st.markdown("**📋 Lista de objetos detectados:**")
+        for i, obj in enumerate(st.session_state.objetos_migracion, 1):
+            st.checkbox(f"{i}. {obj}", value=False, disabled=True, key=f"chk_migracion_{i}")
+
 # === TAB 1: DETECCIÓN ===
 with tab1:
     uploaded_file = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"], key=st.session_state["file_uploader_key"])
