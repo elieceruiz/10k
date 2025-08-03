@@ -60,23 +60,48 @@ st.progress(progreso)
 tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección", "⏱️ Tiempo en vivo", "📚 Historial"])
 
 # === TAB MIGRACIÓN ===
+col_migracion = db["registro_migracion"]
+
+if "cronometro_inicio_migracion" not in st.session_state:
+    st.session_state.cronometro_inicio_migracion = None
+
 with tab_migracion:
-    st.subheader("🧪 Captura con cámara (fluida y ligera)")
+    st.subheader("🧪 Captura con cronómetro y guardado automático")
 
-    archivo = st.file_uploader(
-        "📷 Toca aquí para tomar una foto (usa la cámara en móvil)",
-        type=["jpg"],
-        accept_multiple_files=False,
-        label_visibility="collapsed",
-        key="migracion_uploader_fluido"
-    )
+    if st.button("📷 Tocar para empezar captura"):
+        st.session_state.cronometro_inicio_migracion = datetime.now()
+        st.rerun()
 
-    if archivo:
-        imagen = Image.open(archivo)
-        st.image(imagen, caption="✅ Foto tomada", use_container_width=True)
-        st.session_state.imagen_migracion = imagen
+    if st.session_state.cronometro_inicio_migracion:
+        archivo = st.file_uploader(
+            "Toca aquí para tomar la foto (preferiblemente cámara)",
+            type=["jpg"],
+            accept_multiple_files=False,
+            label_visibility="collapsed",
+            key="migracion_uploader_crono"
+        )
 
-        st.button("🔍 Analizar con GPT-4o")  # aún sin lógica
+        if archivo:
+            imagen = Image.open(archivo)
+            st.image(imagen, caption="✅ Foto tomada", use_container_width=True)
+            st.session_state.imagen_migracion = imagen
+
+            fin = datetime.now(tz)
+            duracion = (fin - st.session_state.cronometro_inicio_migracion).total_seconds()
+            st.success(f"⏱️ Tiempo desde inicio: {round(duracion, 2)} segundos")
+            st.session_state.tiempo_captura_migracion = duracion
+
+            imagen_b64 = convertir_imagen_base64(imagen)
+            doc = {
+                "timestamp": fin,
+                "tiempo_captura_segundos": duracion,
+                "imagen_b64": imagen_b64
+            }
+            col_migracion.insert_one(doc)
+
+            st.success("📥 Registro guardado en MongoDB")
+
+            st.button("🔍 Analizar con GPT-4o")  # aún sin lógica
 
 # === TAB 1: DETECCIÓN ===
 with tab1:
