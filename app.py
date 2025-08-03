@@ -60,9 +60,10 @@ if uploaded_file:
                     st.success("✅ Objetos detectados:")
                     st.write(objetos)
 
-                    # ✅ LISTA CON CHECKBOXES DESHABILITADOS
+                    # ✅ CHECKBOXES INTERACTIVOS (SIN LÓGICA FUNCIONAL)
+                    st.markdown("**🖱️ Marca los elementos libremente:**")
                     for i, obj in enumerate(objetos):
-                        st.checkbox(label=obj, key=f"chk_{i}", value=False, disabled=True)
+                        st.checkbox(label=obj, key=f"chk_{i}", value=False)
 
                     # REGISTRO EN MONGO
                     doc = {
