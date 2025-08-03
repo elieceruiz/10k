@@ -30,9 +30,12 @@ def convertir_imagen_base64(imagen):
     return base64.b64encode(buffer.getvalue()).decode()
 
 # === SESSION STATE ===
-for key in ["seleccionados", "modo_zen", "tareas_zen", "indice_actual", "cronometro_inicio", "tiempos_zen", "mongo_id"]:
+for key in ["seleccionados", "modo_zen", "tareas_zen", "indice_actual", "cronometro_inicio", "tiempos_zen", "mongo_id", "objetos_actuales", "imagen_cargada", "nombre_archivo"]:
     if key not in st.session_state:
-        st.session_state[key] = None if key != "seleccionados" else []
+        if key == "seleccionados" or key == "objetos_actuales" or key == "tiempos_zen" or key == "tareas_zen":
+            st.session_state[key] = []
+        else:
+            st.session_state[key] = None
 
 # === PESTAÑAS ===
 tab1, tab2, tab3 = st.tabs(["🔍 Detección", "⏱️ Tiempo en vivo", "📚 Historial"])
@@ -76,13 +79,13 @@ with tab1:
                 except Exception as e:
                     st.error(f"Error en la detección: {e}")
 
-    if "objetos_actuales" in st.session_state:
+    if st.session_state.objetos_actuales:
         restantes = [obj for obj in st.session_state.objetos_actuales if obj not in st.session_state.seleccionados]
         st.markdown("**🖱️ Marca los elementos para la tarea monotarea:**")
         for obj in restantes:
             if st.checkbox(obj, key=f"chk_{obj}"):
                 st.session_state.seleccionados.append(obj)
-                st.rerun()
+                st.experimental_rerun()
 
         if st.session_state.seleccionados:
             seleccionados_numerados = [f"{i+1}. {item}" for i, item in enumerate(st.session_state.seleccionados)]
@@ -91,8 +94,8 @@ with tab1:
 
         if not st.session_state.get("modo_zen", False):
             if st.button("🧘 Empezamos a ordenar"):
-                st.warning("⏳ Ejecutando guardado...")  # VERIFICACIÓN
-                if "imagen_cargada" not in st.session_state:
+                st.warning("⏳ Ejecutando guardado...")
+                if "imagen_cargada" not in st.session_state or st.session_state["imagen_cargada"] is None:
                     st.error("❌ No se encontró la imagen cargada.")
                 else:
                     imagen_b64 = convertir_imagen_base64(st.session_state["imagen_cargada"])
@@ -107,8 +110,13 @@ with tab1:
                     st.session_state.tareas_zen = st.session_state.seleccionados.copy()
                     st.session_state.indice_actual = 0
                     st.session_state.modo_zen = True
+                    # --- LIMPIAR PRIMERA PESTAÑA ---
+                    st.session_state.seleccionados = []
+                    st.session_state.objetos_actuales = []
+                    st.session_state.imagen_cargada = None
+                    st.session_state.nombre_archivo = None
                     st.success("✅ Guardado. Ahora ve a la pestaña de tiempo.")
-                    st.rerun()
+                    st.experimental_rerun()
         else:
             st.success("✅ Todo listo. Ve a la pestaña **⏱️ Tiempo en vivo** para comenzar.")
 
@@ -128,7 +136,7 @@ with tab2:
                     st.experimental_rerun()
             else:
                 tiempo_transcurrido = datetime.now(tz) - st.session_state.cronometro_inicio
-                tiempo_str = str(tiempo_transcurrado).split(".")[0]
+                tiempo_str = str(tiempo_transcurrido).split(".")[0]
                 st.info(f"⏱ Tiempo: {tiempo_str}")
 
                 if st.button("✅ Tarea completada", key=f"done_{idx}"):
