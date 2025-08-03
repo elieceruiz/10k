@@ -44,6 +44,18 @@ for key in ["seleccionados", "modo_zen", "tareas_zen", "indice_actual", "cronome
 if "file_uploader_key" not in st.session_state:
     st.session_state["file_uploader_key"] = "uploader_0"
 
+# === RESUMEN TOTAL DE TIEMPOS ===
+total_segundos = 0
+for reg in col.find({"tiempos_zen": {"$exists": True}}):
+    for entrada in reg["tiempos_zen"]:
+        total_segundos += entrada.get("duracion_segundos", 0)
+
+total_horas = total_segundos / 3600
+progreso = min(total_horas / 10000, 1.0)
+
+st.markdown(f"### ⏳ Progreso total: **{round(total_horas, 2)} / 10.000 horas**")
+st.progress(progreso)
+
 # === PESTAÑAS ===
 tab1, tab2, tab3 = st.tabs(["🔍 Detección", "⏱️ Tiempo en vivo", "📚 Historial"])
 
@@ -180,16 +192,15 @@ with tab3:
     if registros:
         for reg in registros:
             fecha = reg.get("timestamp", datetime.now()).astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
-            st.markdown(f"**🕓 {fecha}**")
-            if "imagen_b64" in reg:
-                st.image(Image.open(BytesIO(base64.b64decode(reg["imagen_b64"]))), width=300, caption="📸 Imagen registrada")
-            st.write("📦 Objetos detectados:")
-            for i, obj in enumerate(reg.get("objetos", []), 1):
-                st.write(f"- {obj}")
-            if "tiempos_zen" in reg:
-                st.markdown("⏱️ **Modo zen:**")
-                for i, t in enumerate(reg["tiempos_zen"], 1):
-                    st.write(f"{i}. {t['nombre']} – {round(t['duracion_segundos'])}s")
-            st.markdown("---")
+            with st.expander(f"🕓 {fecha}", expanded=False):
+                if "imagen_b64" in reg:
+                    st.image(Image.open(BytesIO(base64.b64decode(reg["imagen_b64"]))), width=300, caption="📸 Imagen registrada")
+                st.write("📦 Objetos detectados:")
+                for i, obj in enumerate(reg.get("objetos", []), 1):
+                    st.write(f"- {obj}")
+                if "tiempos_zen" in reg:
+                    st.markdown("⏱️ **Modo zen:**")
+                    for i, t in enumerate(reg["tiempos_zen"], 1):
+                        st.write(f"{i}. {t['nombre']} – {round(t['duracion_segundos'])}s")
     else:
         st.info("No hay sesiones completas registradas aún.")
