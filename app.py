@@ -23,11 +23,18 @@ col = db["registro_sesiones"]
 openai.api_key = OPENAI_API_KEY
 tz = pytz.timezone("America/Bogota")
 
-# === FUNCIÓN BASE64 ===
+# === FUNCIONES ===
 def convertir_imagen_base64(imagen):
     buffer = BytesIO()
     imagen.save(buffer, format="JPEG")
     return base64.b64encode(buffer.getvalue()).decode()
+
+def reducir_imagen(imagen, max_ancho=600):
+    if imagen.width > max_ancho:
+        proporcion = max_ancho / imagen.width
+        nuevo_tamano = (int(imagen.width * proporcion), int(imagen.height * proporcion))
+        return imagen.resize(nuevo_tamano)
+    return imagen
 
 # === SESSION STATE ===
 for key in ["seleccionados", "modo_zen", "tareas_zen", "indice_actual", "cronometro_inicio", "tiempos_zen", "mongo_id", "imagen_cargada", "nombre_archivo", "objetos_actuales"]:
@@ -97,7 +104,8 @@ with tab1:
                 st.error("❌ No se encontró la imagen cargada.")
             else:
                 with st.spinner("⏳ Guardando sesión y preparando modo zen..."):
-                    imagen_b64 = convertir_imagen_base64(st.session_state["imagen_cargada"])
+                    imagen_reducida = reducir_imagen(st.session_state["imagen_cargada"])
+                    imagen_b64 = convertir_imagen_base64(imagen_reducida)
                     doc = {
                         "timestamp": datetime.now(tz),
                         "objetos": st.session_state.objetos_actuales,
