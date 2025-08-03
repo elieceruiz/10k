@@ -7,10 +7,11 @@ from pymongo import MongoClient
 from PIL import Image
 from io import BytesIO
 import pandas as pd
+import requests
 
 # === CONFIGURACIÓN ===
-st.set_page_config(page_title="👁️ Visión GPT-4o – Proyecto 10K", layout="centered")
-st.title("👁️ Visión GPT-4o – Proyecto 10K")
+st.set_page_config(page_title="👁️ Proyecto 10K – Visión Resiliente", layout="centered")
+st.title("👁️ Proyecto 10K – Visión Resiliente")
 
 # === CLAVES SEGURAS ===
 openai.api_key = st.secrets["openai_api_key"]
@@ -24,7 +25,7 @@ imagen = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
 if imagen:
     st.image(imagen, caption="Imagen cargada", use_container_width=True)
 
-    # Codificamos imagen
+    # Codificar imagen
     bytes_imagen = imagen.read()
     imagen_pil = Image.open(BytesIO(bytes_imagen))
     buffered = BytesIO()
@@ -33,8 +34,11 @@ if imagen:
     st.session_state.imagen_codificada = imagen_codificada
     st.session_state.imagen_nombre = imagen.name
 
-    # === DETECCIÓN CON GPT-4o ===
-    with st.spinner("🔍 Detectando objetos..."):
+    objetos_detectados = []
+    fuente = ""
+
+    # === DETECCIÓN GPT-4o (PRIMER INTENTO) ===
+    with st.spinner("🔍 Detectando objetos con OpenAI..."):
         try:
             respuesta = openai.chat.completions.create(
                 model="gpt-4o",
@@ -51,12 +55,28 @@ if imagen:
             )
             contenido = respuesta.choices[0].message.content
             objetos_detectados = [x.strip() for x in contenido.split(",") if x.strip()]
-        except openai.RateLimitError:
-            st.error("⛔ Has superado el límite de uso de la API de OpenAI. Intenta más tarde.")
-            objetos_detectados = []
+            fuente = "OpenAI GPT-4o"
+        except openai.OpenAIError:
+            # === BACKUP: Hugging Face ===
+            st.warning("⚠️ GPT-4o no disponible. Usando motor alterno gratuito (Hugging Face)...")
+            api_url = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
+            headers = {"Accept": "application/json"}
+            response = requests.post(
+                api_url,
+                headers=headers,
+                files={"image": buffered.getvalue()}
+            )
+            try:
+                data = response.json()
+                if isinstance(data, list) and "generated_text" in data[0]:
+                    texto = data[0]["generated_text"]
+                    objetos_detectados = [x.strip().lower() for x in texto.replace(".", "").split() if len(x) > 3]
+                    fuente = "Hugging Face (backup)"
+            except:
+                st.error("❌ No fue posible detectar objetos con ningún modelo.")
 
     if objetos_detectados:
-        st.markdown("### 🔎 Objetos detectados por IA:")
+        st.markdown(f"### 🔎 Objetos detectados por IA ({fuente}):")
         seleccionados = {}
 
         for idx, obj in enumerate(objetos_detectados):
@@ -115,6 +135,7 @@ if imagen:
                             "orden": orden_actual,
                             "lugar_asignado": lugar,
                             "tiempo_organizacion_segundos": st.session_state[key_tiempo],
+                            "fuente": fuente,
                             "nombre_imagen": st.session_state.imagen_nombre,
                             "imagen_base64": st.session_state.imagen_codificada
                         })
@@ -137,7 +158,7 @@ with st.expander("📜 Historial"):
     if docs:
         df = pd.DataFrame(docs)
         df["fecha"] = df["fecha"].dt.strftime("%Y-%m-%d %H:%M:%S")
-        df = df[["fecha", "objeto", "orden", "lugar_asignado", "tiempo_organizacion_segundos"]]
+        df = df[["fecha", "objeto", "orden", "lugar_asignado", "tiempo_organizacion_segundos", "fuente"]]
         df["tiempo_h:m:s"] = df["tiempo_organizacion_segundos"].apply(lambda s: str(timedelta(seconds=s)))
         st.dataframe(df)
 
@@ -152,5 +173,5 @@ with st.expander("📜 Historial"):
     else:
         st.info("Aún no hay registros.")
 
-# === ENLACE PARA REVISAR SALDO ===
+# === ENLACE PARA REVISAR SALDO OPENAI ===
 st.markdown("🔗 [Verifica tu saldo de tokens en OpenAI](https://platform.openai.com/usage)")
