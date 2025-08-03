@@ -32,7 +32,7 @@ def convertir_imagen_base64(imagen):
 # === SESSION STATE ===
 for key in ["seleccionados", "modo_zen", "tareas_zen", "indice_actual", "cronometro_inicio", "tiempos_zen", "mongo_id", "objetos_actuales", "imagen_cargada", "nombre_archivo"]:
     if key not in st.session_state:
-        if key == "seleccionados" or key == "objetos_actuales" or key == "tiempos_zen" or key == "tareas_zen":
+        if key in ["seleccionados", "objetos_actuales", "tiempos_zen", "tareas_zen"]:
             st.session_state[key] = []
         else:
             st.session_state[key] = None
@@ -85,7 +85,7 @@ with tab1:
         for obj in restantes:
             if st.checkbox(obj, key=f"chk_{obj}"):
                 st.session_state.seleccionados.append(obj)
-                st.experimental_rerun()
+                st.rerun()
 
         if st.session_state.seleccionados:
             seleccionados_numerados = [f"{i+1}. {item}" for i, item in enumerate(st.session_state.seleccionados)]
@@ -95,7 +95,7 @@ with tab1:
         if not st.session_state.get("modo_zen", False):
             if st.button("🧘 Empezamos a ordenar"):
                 st.warning("⏳ Ejecutando guardado...")
-                if "imagen_cargada" not in st.session_state or st.session_state["imagen_cargada"] is None:
+                if st.session_state["imagen_cargada"] is None:
                     st.error("❌ No se encontró la imagen cargada.")
                 else:
                     imagen_b64 = convertir_imagen_base64(st.session_state["imagen_cargada"])
@@ -110,13 +110,13 @@ with tab1:
                     st.session_state.tareas_zen = st.session_state.seleccionados.copy()
                     st.session_state.indice_actual = 0
                     st.session_state.modo_zen = True
-                    # --- LIMPIAR PRIMERA PESTAÑA ---
+                    # LIMPIAR
                     st.session_state.seleccionados = []
                     st.session_state.objetos_actuales = []
                     st.session_state.imagen_cargada = None
                     st.session_state.nombre_archivo = None
                     st.success("✅ Guardado. Ahora ve a la pestaña de tiempo.")
-                    st.experimental_rerun()
+                    st.rerun()
         else:
             st.success("✅ Todo listo. Ve a la pestaña **⏱️ Tiempo en vivo** para comenzar.")
 
@@ -133,7 +133,7 @@ with tab2:
             if st.session_state.cronometro_inicio is None:
                 if st.button("🎯 Empezar tarea"):
                     st.session_state.cronometro_inicio = datetime.now(tz)
-                    st.experimental_rerun()
+                    st.rerun()
             else:
                 tiempo_transcurrido = datetime.now(tz) - st.session_state.cronometro_inicio
                 tiempo_str = str(tiempo_transcurrido).split(".")[0]
@@ -149,10 +149,10 @@ with tab2:
                     })
                     st.session_state.indice_actual += 1
                     st.session_state.cronometro_inicio = None
-                    st.experimental_rerun()
+                    st.rerun()
 
                 time.sleep(1)
-                st.experimental_rerun()
+                st.rerun()
         else:
             st.success("🎉 Modo zen completado. Tiempos registrados.")
             if st.session_state.mongo_id:
