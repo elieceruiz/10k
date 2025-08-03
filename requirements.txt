@@ -3,3 +3,4 @@ pymongo
 openai
 pillow
 pandas
+requests
