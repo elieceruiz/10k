@@ -65,76 +65,46 @@ with tab_migracion:
 
     archivo = st.file_uploader(
         "📷 Toca aquí para tomar una foto (usa la cámara en móvil)",
-        type=["jpg", "jpeg", "png"],
+        type=["jpg"],
         accept_multiple_files=False,
         label_visibility="collapsed",
-        key="migracion_uploader"
+        key=st.session_state.get("migracion_uploader_key", "migracion_uploader_0")
     )
 
-    # Primera vez: cargar imagen y guardar
-    if archivo and "mongo_id_migracion" not in st.session_state:
-        imagen = Image.open(archivo)
-        st.session_state.imagen_migracion = imagen
+    if archivo and "imagen_migracion" not in st.session_state:
+        st.session_state.imagen_migracion = Image.open(archivo)
         st.session_state.migracion_tiempo_inicio = time.time()
-
-        imagen_reducida = reducir_imagen(imagen)
-        imagen_b64 = convertir_imagen_base64(imagen_reducida)
-
-        doc = {
-            "timestamp": datetime.now(tz),
-            "imagen_b64": imagen_b64,
-            "timestamp_inicio_openai": st.session_state.migracion_tiempo_inicio
-        }
-        inserted = col.insert_one(doc)
-        st.session_state.mongo_id_migracion = inserted.inserted_id
+        st.session_state.objetos_migracion = None
+        st.session_state.migracion_duracion = None
+        st.session_state.migracion_uploader_key = f"migracion_uploader_{time.time()}"
         st.rerun()
 
-    # Solo mostramos el botón si no hay análisis aún
-    if (
-        st.session_state.get("imagen_migracion") and
-        "objetos_migracion" not in st.session_state
-    ):
+    if st.session_state.get("imagen_migracion") and not st.session_state.get("objetos_migracion"):
         st.image(st.session_state.imagen_migracion, caption="✅ Foto tomada", use_container_width=True)
-        st.button("🔍 Analizar con GPT-4o", key="analizar_openai_migracion")
+        if st.button("🔍 Analizar con GPT-4o"):
+            with st.spinner("Analizando imagen con GPT-4o..."):
+                b64_img = "data:image/jpeg;base64," + convertir_imagen_base64(reducir_imagen(st.session_state.imagen_migracion))
+                try:
+                    respuesta = openai.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[
+                            {"role": "user", "content": [
+                                {"type": "text", "text": "Detecta solo objetos visibles. Devuelve una lista clara y concisa."},
+                                {"type": "image_url", "image_url": {"url": b64_img}}
+                            ]}
+                        ],
+                        max_tokens=300,
+                    )
+                    contenido = respuesta.choices[0].message.content
+                    objetos = [o.strip("-• ").capitalize() for o in contenido.split("\n") if o.strip()]
+                    st.session_state.objetos_migracion = objetos
+                    st.session_state.migracion_duracion = round(time.time() - st.session_state.migracion_tiempo_inicio, 1)
+                    st.session_state.imagen_migracion = None
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error: {e}")
 
-    # Si ya se activó el botón, detectamos
-    if st.session_state.get("imagen_migracion") and "objetos_migracion" not in st.session_state and st.session_state.get("analizar_openai_migracion"):
-        with st.spinner("🔎 Detectando objetos con GPT-4o..."):
-            try:
-                b64_img = "data:image/jpeg;base64," + convertir_imagen_base64(st.session_state.imagen_migracion)
-                respuesta = openai.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "user", "content": [
-                            {"type": "text", "text": "Detecta solo objetos visibles. Devuelve una lista clara de objetos, sin descripciones largas ni contexto adicional."},
-                            {"type": "image_url", "image_url": {"url": b64_img}}
-                        ]}
-                    ],
-                    max_tokens=300,
-                )
-                contenido = respuesta.choices[0].message.content
-                objetos = [obj.strip("-• ").capitalize() for obj in contenido.split("\n") if obj.strip()]
-                fin = time.time()
-                duracion = round(fin - st.session_state.migracion_tiempo_inicio, 2)
-
-                st.session_state.objetos_migracion = objetos
-                st.session_state.migracion_duracion = duracion
-
-                col.update_one(
-                    {"_id": st.session_state.mongo_id_migracion},
-                    {"$set": {
-                        "objetos": objetos,
-                        "timestamp_fin_openai": fin,
-                        "tiempo_total_segundos": duracion
-                    }}
-                )
-                st.rerun()
-
-            except Exception as e:
-                st.error(f"Error en la detección: {e}")
-
-    # Cuando ya hay objetos detectados, mostrar solo eso
-    if "objetos_migracion" in st.session_state:
+    if st.session_state.get("objetos_migracion"):
         st.success(f"✅ Objetos detectados en {st.session_state.migracion_duracion} segundos")
         st.json(st.session_state.objetos_migracion)
 
