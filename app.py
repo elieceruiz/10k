@@ -1,127 +1,109 @@
 import streamlit as st
 from pymongo import MongoClient
-import openai
-from datetime import datetime
 from PIL import Image
+import openai
 import pytz
+import io
 import time
-import base64
-from io import BytesIO
+from datetime import datetime
 
-# === CONFIGURACIÓN ===
+# --- CONFIG STREAMLIT ---
 st.set_page_config(page_title="👁️ Visión GPT-4o – Proyecto 10K", layout="centered")
 st.title("👁️ Visión GPT-4o – Proyecto 10K")
 
-# === CREDENCIALES Y CONEXIÓN ===
-openai.api_key = st.secrets["openai_api_key"]
-client = MongoClient(st.secrets["mongo_uri"])
+# --- CONEXIÓN MONGO ---
+MONGO_URI = st.secrets["mongo_uri"]
+client = MongoClient(MONGO_URI)
 db = client["proyecto_10k"]
 col = db["registro_sesiones"]
+
+# --- CLAVE OPENAI ---
+openai.api_key = st.secrets["openai_api_key"]
+
+# --- ZONA HORARIA CO ---
 tz = pytz.timezone("America/Bogota")
 
-# === ESTADO DE SESIÓN ===
-if "objetos" not in st.session_state:
-    st.session_state.objetos = []
-if "orden" not in st.session_state:
-    st.session_state.orden = []
-if "tiempos" not in st.session_state:
-    st.session_state.tiempos = {}
-if "start_time" not in st.session_state:
-    st.session_state.start_time = None
-if "imagen_guardada" not in st.session_state:
-    st.session_state.imagen_guardada = None
+# --- ESTADOS DE SESIÓN ---
+if "objetos_detectados" not in st.session_state:
+    st.session_state.objetos_detectados = []
 
-# === SUBIR IMAGEN ===
+if "seleccionados" not in st.session_state:
+    st.session_state.seleccionados = {}
+
+if "cronometros" not in st.session_state:
+    st.session_state.cronometros = {}
+
+if "inicio_global" not in st.session_state:
+    st.session_state.inicio_global = None
+
+# --- SUBIR IMAGEN ---
 imagen = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
 if imagen:
     st.image(imagen, caption="Imagen cargada", use_container_width=True)
 
-    # Guardar imagen temporalmente
-    img = Image.open(imagen)
-    buffered = BytesIO()
-    img.save(buffered, format="JPEG")
-    img_bytes = buffered.getvalue()
-    encoded_image = base64.b64encode(img_bytes).decode()
-
-    # Detectar objetos automáticamente solo si aún no se ha hecho
-    if not st.session_state.objetos:
+    # Detectar objetos al presionar botón
+    if st.button("🔍 Detectar objetos"):
         try:
-            respuesta = openai.chat.completions.create(
+            bytes_imagen = imagen.read()
+            base64_imagen = bytes_imagen.encode("base64") if isinstance(bytes_imagen, str) else bytes_imagen
+
+            response = openai.chat.completions.create(
                 model="gpt-4o",
                 messages=[
-                    {
-                        "role": "system",
-                        "content": "Eres un asistente que detecta solo los objetos visibles en una imagen. Devuélvelos como lista en Python. Sin explicaciones."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"La siguiente imagen está codificada en base64:\n{encoded_image}"
-                    }
+                    {"role": "system", "content": "Eres un experto en visión por computadora."},
+                    {"role": "user", "content": f"Describe en palabras simples los objetos visibles en esta imagen."}
                 ],
-                max_tokens=300,
-                temperature=0.2
+                max_tokens=100  # límite impuesto para evitar errores
             )
-            texto = respuesta.choices[0].message.content
 
-            # Extraer lista con expresiones regulares si no es un formato válido
-            import re
-            posibles = re.findall(r'"(.*?)"|\'(.*?)\'|(?<=- )(.+)', texto)
-            planos = [x[0] or x[1] or x[2] for x in posibles if any(x)]
+            texto = response.choices[0].message.content
+            objetos = [line.strip(" .") for line in texto.split(",") if line.strip()]
+            st.session_state.objetos_detectados = objetos
+            st.session_state.seleccionados = {}
+            st.session_state.cronometros = {}
 
-            if planos:
-                st.session_state.objetos = planos
-            else:
-                st.warning("❌ No se detectaron objetos.")
+            st.success("✅ Objetos detectados por IA.")
 
         except Exception as e:
             st.error(f"Error en la detección: {e}")
 
-# === MOSTRAR OBJETOS Y SELECCIÓN DE ORDEN ===
-if st.session_state.objetos:
-    st.subheader("📦 Objetos detectados")
-    seleccionados = {}
-    for i, obj in enumerate(st.session_state.objetos):
-        seleccionados[obj] = st.checkbox(f"{i+1}. {obj}")
+# --- MOSTRAR OBJETOS DETECTADOS ---
+if st.session_state.objetos_detectados:
+    st.subheader("📦 Objetos detectados:")
+    for idx, obj in enumerate(st.session_state.objetos_detectados, 1):
+        col1, col2 = st.columns([0.8, 0.2])
+        with col1:
+            check = st.checkbox(f"{idx}. {obj}", key=f"check_{idx}")
+        with col2:
+            if check:
+                if obj not in st.session_state.seleccionados:
+                    st.session_state.seleccionados[obj] = time.time()
+                    st.success(f"Iniciado: {obj}")
+            else:
+                if obj in st.session_state.seleccionados:
+                    fin = time.time()
+                    duracion = round(fin - st.session_state.seleccionados[obj])
+                    st.session_state.cronometros[obj] = duracion
+                    del st.session_state.seleccionados[obj]
 
-    if st.button("✅ Iniciar cronómetro con seleccionados"):
-        orden = [obj for obj, marcado in seleccionados.items() if marcado]
-        if orden:
-            st.session_state.orden = orden
-            st.session_state.start_time = time.time()
-            st.rerun()
-        else:
-            st.warning("Selecciona al menos un objeto para iniciar.")
+# --- BOTÓN PARA FINALIZAR Y GUARDAR ---
+if st.button("💾 Finalizar sesión"):
+    ahora = datetime.now(tz)
+    doc = {
+        "fecha": ahora.isoformat(),
+        "objetos": list(st.session_state.cronometros.keys()),
+        "tiempos": st.session_state.cronometros,
+        "total_segundos": sum(st.session_state.cronometros.values())
+    }
+    col.insert_one(doc)
+    st.success("✅ Sesión guardada en MongoDB.")
+    st.session_state.objetos_detectados = []
+    st.session_state.seleccionados = {}
+    st.session_state.cronometros = {}
 
-# === CRONÓMETRO Y REGISTRO ===
-if st.session_state.start_time and st.session_state.orden:
-    st.subheader("⏱ Cronómetro en marcha...")
-    now = time.time()
-    elapsed = int(now - st.session_state.start_time)
-    minutos, segundos = divmod(elapsed, 60)
-    st.markdown(f"🧭 Tiempo transcurrido: **{minutos:02d}:{segundos:02d}**")
-
-    # Mostrar objetos en orden para "ubicar"
-    st.markdown("### 🗂 Orden actual:")
-    for i, obj in enumerate(st.session_state.orden, 1):
-        st.write(f"{i}. {obj}")
-
-    if elapsed >= 120:  # A los 2 minutos se permite registrar
-        if st.button("📥 Guardar sesión y reiniciar"):
-            doc = {
-                "objetos": st.session_state.orden,
-                "duracion_segundos": elapsed,
-                "timestamp": datetime.now(tz),
-                "imagen": encoded_image
-            }
-            col.insert_one(doc)
-            st.success("✅ Sesión registrada exitosamente.")
-            st.session_state.objetos = []
-            st.session_state.orden = []
-            st.session_state.start_time = None
-            st.session_state.tiempos = {}
-            st.session_state.imagen_guardada = None
-            st.rerun()
-
-# === USO API OPENAI ===
-st.markdown("---")
-st.markdown("🔎 [Consulta tu uso de créditos OpenAI](https://platform.openai.com/usage)")
+# --- MOSTRAR CRONÓMETRO GLOBAL ---
+if st.session_state.seleccionados:
+    st.subheader("🕒 Cronómetro en curso:")
+    for obj, inicio in st.session_state.seleccionados.items():
+        transcurrido = round(time.time() - inicio)
+        st.markdown(f"- **{obj}**: {transcurrido} segundos")
