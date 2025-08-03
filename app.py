@@ -57,7 +57,12 @@ st.markdown(f"### ⏳ Progreso total: **{round(total_horas, 2)} / 10.000 horas**
 st.progress(progreso)
 
 # === PESTAÑAS ===
-tab1, tab2, tab3 = st.tabs(["🔍 Detección", "⏱️ Tiempo en vivo", "📚 Historial"])
+tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección", "⏱️ Tiempo en vivo", "📚 Historial"])
+
+# === TAB MIGRACIÓN ===
+with tab_migracion:
+    st.subheader("🧪 Área de pruebas para migraciones")
+    st.info("Aquí puedes desarrollar y probar nuevas funcionalidades antes de integrarlas a las demás pestañas.")
 
 # === TAB 1: DETECCIÓN ===
 with tab1:
