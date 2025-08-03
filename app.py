@@ -86,27 +86,25 @@ if st.session_state.modo_zen:
                 st.session_state.cronometro_inicio = datetime.now(tz)
                 st.rerun()
         else:
-            cronometro_area = st.empty()
-            boton_area = st.empty()
+            # Mostrar cronómetro en vivo sin repetir botón
+            tiempo_transcurrido = datetime.now(tz) - st.session_state.cronometro_inicio
+            tiempo_str = str(tiempo_transcurrido).split(".")[0]
+            st.info(f"⏱ Tiempo: {tiempo_str}")
 
-            while True:
-                tiempo_transcurrido = datetime.now(tz) - st.session_state.cronometro_inicio
-                tiempo_str = str(tiempo_transcurrido).split(".")[0]
-                cronometro_area.info(f"⏱ Tiempo: {tiempo_str}")
+            if st.button("✅ Tarea completada", key=f"done_{idx}"):
+                fin = datetime.now(tz)
+                st.session_state.tiempos_zen.append({
+                    "nombre": tarea,
+                    "tiempo_inicio": st.session_state.cronometro_inicio.isoformat(),
+                    "tiempo_fin": fin.isoformat(),
+                    "duracion_segundos": (fin - st.session_state.cronometro_inicio).total_seconds()
+                })
+                st.session_state.indice_actual += 1
+                st.session_state.cronometro_inicio = None
+                st.rerun()
 
-                if boton_area.button("✅ Tarea completada"):
-                    fin = datetime.now(tz)
-                    st.session_state.tiempos_zen.append({
-                        "nombre": tarea,
-                        "tiempo_inicio": st.session_state.cronometro_inicio.isoformat(),
-                        "tiempo_fin": fin.isoformat(),
-                        "duracion_segundos": (fin - st.session_state.cronometro_inicio).total_seconds()
-                    })
-                    st.session_state.indice_actual += 1
-                    st.session_state.cronometro_inicio = None
-                    st.rerun()
-
-                time.sleep(1)
+            time.sleep(1)
+            st.rerun()
     else:
         st.success("🎉 Modo zen completado. Tiempos registrados.")
         if st.session_state.mongo_id:
