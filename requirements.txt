@@ -1,6 +1,6 @@
 streamlit
-pymongo
 openai
+pymongo
 pillow
 pandas
 requests
