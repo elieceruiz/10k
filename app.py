@@ -62,51 +62,41 @@ tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección",
 # === TAB MIGRACIÓN ===
 col_migracion = db["registro_migracion"]
 
-if "cronometro_inicio_migracion" not in st.session_state:
-    st.session_state.cronometro_inicio_migracion = None
+if "inicio_captura_migracion" not in st.session_state:
+    st.session_state.inicio_captura_migracion = datetime.now(tz)
 
 with tab_migracion:
-    st.subheader("🧪 Captura con cronómetro y guardado automático")
+    st.subheader("🧪 Captura directa (fluida y mínima)")
 
-    if st.button("📷 Tocar para empezar captura"):
-        st.session_state.cronometro_inicio_migracion = datetime.now(tz)
-        st.rerun()
+    archivo = st.file_uploader(
+        "📷 Toca aquí para tomar la foto (preferiblemente con cámara)",
+        type=["jpg"],
+        accept_multiple_files=False,
+        label_visibility="collapsed",
+        key="migracion_uploader_directo"
+    )
 
-    if st.session_state.cronometro_inicio_migracion:
-        archivo = st.file_uploader(
-            "Toca aquí para tomar la foto (preferiblemente cámara)",
-            type=["jpg"],
-            accept_multiple_files=False,
-            label_visibility="collapsed",
-            key="migracion_uploader_crono"
-        )
+    if archivo:
+        fin = datetime.now(tz)
+        duracion = (fin - st.session_state.inicio_captura_migracion).total_seconds()
 
-        if archivo:
-            imagen = Image.open(archivo)
-            st.image(imagen, caption="✅ Foto tomada", use_container_width=True)
-            st.session_state.imagen_migracion = imagen
+        imagen = Image.open(archivo)
+        st.image(imagen, caption="✅ Foto tomada", use_container_width=True)
+        st.success(f"⏱️ Tiempo desde carga: {round(duracion, 2)} segundos")
 
-            fin = datetime.now(tz)
+        imagen_b64 = convertir_imagen_base64(imagen)
+        doc = {
+            "timestamp": fin,
+            "tiempo_captura_segundos": duracion,
+            "imagen_b64": imagen_b64
+        }
+        col_migracion.insert_one(doc)
 
-            if not isinstance(st.session_state.cronometro_inicio_migracion, datetime):
-                st.warning("⛔ El cronómetro no se inició correctamente.")
-                st.stop()
+        st.success("📥 Guardado automático en MongoDB")
+        st.button("🔍 Analizar con GPT-4o")  # aún sin lógica
 
-            duracion = (fin - st.session_state.cronometro_inicio_migracion).total_seconds()
-            st.success(f"⏱️ Tiempo desde inicio: {round(duracion, 2)} segundos")
-            st.session_state.tiempo_captura_migracion = duracion
-
-            imagen_b64 = convertir_imagen_base64(imagen)
-            doc = {
-                "timestamp": fin,
-                "tiempo_captura_segundos": duracion,
-                "imagen_b64": imagen_b64
-            }
-            col_migracion.insert_one(doc)
-
-            st.success("📥 Registro guardado en MongoDB")
-
-            st.button("🔍 Analizar con GPT-4o")  # aún sin lógica
+        # Reiniciar temporizador para siguiente captura
+        st.session_state.inicio_captura_migracion = datetime.now(tz)
 
 # === TAB 1: DETECCIÓN ===
 with tab1:
