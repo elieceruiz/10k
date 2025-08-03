@@ -8,6 +8,7 @@ import openai
 import pytz
 import time
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
+import av
 
 # === CONFIGURACIÓN DE LA APP ===
 st.set_page_config(page_title="Visión GPT-4o – Proyecto 10K", layout="wide")
