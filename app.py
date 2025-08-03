@@ -69,7 +69,7 @@ with tab_migracion:
     st.subheader("🧪 Captura con cronómetro y guardado automático")
 
     if st.button("📷 Tocar para empezar captura"):
-        st.session_state.cronometro_inicio_migracion = datetime.now()
+        st.session_state.cronometro_inicio_migracion = datetime.now(tz)
         st.rerun()
 
     if st.session_state.cronometro_inicio_migracion:
@@ -87,6 +87,11 @@ with tab_migracion:
             st.session_state.imagen_migracion = imagen
 
             fin = datetime.now(tz)
+
+            if not isinstance(st.session_state.cronometro_inicio_migracion, datetime):
+                st.warning("⛔ El cronómetro no se inició correctamente.")
+                st.stop()
+
             duracion = (fin - st.session_state.cronometro_inicio_migracion).total_seconds()
             st.success(f"⏱️ Tiempo desde inicio: {round(duracion, 2)} segundos")
             st.session_state.tiempo_captura_migracion = duracion
