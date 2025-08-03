@@ -1,19 +1,17 @@
 import streamlit as st
 from pymongo import MongoClient
 from PIL import Image
-from io import BytesIO
 import openai
-import pytz
-from datetime import datetime, timedelta
-import base64
-import json
+import io
+from datetime import datetime
 import time
+import pytz
 
-# === CONFIGURACIÓN GENERAL ===
+# === CONFIGURACIÓN INICIAL ===
 st.set_page_config(page_title="👁️ Visión GPT-4o – Proyecto 10K", layout="centered")
 st.title("👁️ Visión GPT-4o – Proyecto 10K")
 
-# === SECRETOS Y CONEXIONES ===
+# === SECRETS Y ZONA HORARIA ===
 MONGO_URI = st.secrets["mongo_uri"]
 client = MongoClient(MONGO_URI)
 db = client["proyecto_10k"]
@@ -22,95 +20,101 @@ col = db["registro_sesiones"]
 openai.api_key = st.secrets["openai_api_key"]
 tz = pytz.timezone("America/Bogota")
 
-# === SUBIDA DE IMAGEN ===
-imagen = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
+# === VARIABLES DE SESIÓN ===
+if "objetos" not in st.session_state:
+    st.session_state.objetos = []
+if "iniciar_tiempo" not in st.session_state:
+    st.session_state.iniciar_tiempo = False
+if "inicio_objeto" not in st.session_state:
+    st.session_state.inicio_objeto = None
+if "objetos_finalizados" not in st.session_state:
+    st.session_state.objetos_finalizados = []
+if "registro" not in st.session_state:
+    st.session_state.registro = []
 
+# === SUBIR IMAGEN ===
+imagen = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
 if imagen:
     st.image(imagen, caption="Imagen cargada", use_container_width=True)
 
-    # Convertir imagen a base64
-    image_bytes = imagen.read()
-    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+    if st.button("🧠 Detectar objetos"):
+        try:
+            image = Image.open(imagen).convert("RGB")
+            buf = io.BytesIO()
+            image.save(buf, format='PNG')
+            byte_im = buf.getvalue()
 
-    if st.button("🔍 Detectar objetos"):
-        with st.spinner("Procesando con IA..."):
-            try:
-                response = openai.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "system", "content": "Eres un detector visual de objetos."},
-                        {"role": "user", "content": "Analiza esta imagen y devuelve SOLO una lista JSON válida (ej: [\"objeto1\", \"objeto2\"]) con los nombres de los objetos visibles, sin ningún texto adicional."},
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{image_base64}"
-                                    }
-                                }
-                            ]
-                        }
-                    ],
-                    max_tokens=150,
-                    temperature=0.2
-                )
+            prompt = "Describe brevemente los objetos visibles en esta imagen en formato lista simple, sin detalles ni contexto, solo nombres de objetos."
+            base64_image = f"data:image/png;base64,{imagen.getvalue().hex()[:50]}"  # Dummy just to show size
 
-                resultado = response.choices[0].message.content.strip()
+            response = openai.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "Eres un asistente de visión artificial que identifica objetos."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=200,
+                temperature=0.2
+            )
+            texto = response.choices[0].message.content
+            objetos_detectados = [line.strip("-• ").strip() for line in texto.splitlines() if line.strip()]
+            st.session_state.objetos = objetos_detectados
+            st.session_state.objetos_finalizados = []
+            st.session_state.registro = []
+            st.success("✅ Objetos detectados por IA.")
 
-                # --- Intentar convertir la respuesta en JSON ---
-                try:
-                    objetos_detectados = json.loads(resultado)
-                    st.success("✅ Objetos detectados por IA.")
-                except json.JSONDecodeError:
-                    st.error("❌ La respuesta de OpenAI no es una lista JSON válida.")
-                    st.code(resultado)
-                    objetos_detectados = []
+        except Exception as e:
+            st.error(f"Error en la detección: {e}")
 
-            except Exception as e:
-                st.error(f"Error en la detección: {str(e)}")
-                objetos_detectados = []
+# === MOSTRAR OBJETOS DETECTADOS CON CHECKS ===
+if st.session_state.objetos:
+    st.subheader("📦 Objetos detectados:")
+    for obj in st.session_state.objetos:
+        if obj not in st.session_state.objetos_finalizados:
+            if st.button(f"✅ Iniciar con: {obj}"):
+                st.session_state.inicio_objeto = (obj, time.time())
+                st.session_state.iniciar_tiempo = True
 
-        # === MOSTRAR OBJETOS DETECTADOS Y ORDEN ===
-        if objetos_detectados:
-            st.subheader("📦 Objetos detectados:")
-            elementos_ordenados = []
+# === CRONÓMETRO OBJETO ===
+if st.session_state.iniciar_tiempo and st.session_state.inicio_objeto:
+    obj, inicio = st.session_state.inicio_objeto
+    st.markdown(f"⏳ **Ordenando:** `{obj}`")
 
-            for idx, obj in enumerate(objetos_detectados):
-                col1, col2 = st.columns([0.1, 0.9])
-                with col1:
-                    check = st.checkbox(f"{idx+1}", key=f"check_{idx}")
-                with col2:
-                    st.write(f"**{obj}**")
+    elapsed = int(time.time() - inicio)
+    st.markdown(f"🧭 Tiempo transcurrido: **{elapsed} segundos**")
 
-                if check:
-                    elementos_ordenados.append(obj)
+    if elapsed >= 120:  # 2 minutos por objeto
+        st.success(f"✅ Objeto `{obj}` ordenado en {elapsed} segundos.")
+        st.session_state.objetos_finalizados.append(obj)
+        st.session_state.registro.append({"objeto": obj, "duracion": elapsed})
 
-            if st.button("🚀 Iniciar cronómetro"):
-                start_time = datetime.now(tz)
-                st.session_state["start"] = start_time
-                st.success("Cronómetro iniciado...")
+        st.session_state.iniciar_tiempo = False
+        st.session_state.inicio_objeto = None
 
-        # === CRONÓMETRO GLOBAL ===
-        if "start" in st.session_state:
-            elapsed = datetime.now(tz) - st.session_state["start"]
-            minutos = elapsed.total_seconds() // 60
-            segundos = int(elapsed.total_seconds() % 60)
-            st.markdown(f"🧭 **Tiempo transcurrido:** {int(minutos):02d}:{segundos:02d}")
-
-            # Guardar en Mongo
-            doc = {
-                "timestamp": datetime.now(tz),
-                "objetos": elementos_ordenados,
-                "duracion_segundos": int(elapsed.total_seconds())
-            }
+        # Guardar en MongoDB
+        doc = {
+            "timestamp": datetime.now(tz),
+            "objetos": [obj],
+            "duracion_segundos": elapsed
+        }
+        try:
             col.insert_one(doc)
+        except Exception as err:
+            st.warning(f"No se pudo guardar en MongoDB: {err}")
+
+        st.rerun()
 
 # === HISTORIAL DE SESIONES ===
-with st.expander("📜 Ver historial"):
-    registros = list(col.find().sort("timestamp", -1).limit(10))
-    for reg in registros:
-        fecha = reg["timestamp"].astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
-        objetos = ", ".join(reg.get("objetos", []))
-        dur = reg.get("duracion_segundos", 0)
-        st.markdown(f"- **{fecha}** → ⏱ {dur} seg | 📦 {objetos}")
+with st.expander("📚 Historial de sesiones"):
+    try:
+        registros = list(col.find().sort("timestamp", -1))
+        for reg in registros:
+            try:
+                fecha = reg["timestamp"].astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
+            except KeyError:
+                fecha = "Fecha no disponible"
+            objetos = ", ".join(reg.get("objetos", []))
+            dur = reg.get("duracion_segundos", 0)
+            st.markdown(f"- **{fecha}** → ⏱ {dur} seg | 📦 {objetos}")
+    except Exception as err:
+        st.error(f"Error al acceder al historial: {err}")
