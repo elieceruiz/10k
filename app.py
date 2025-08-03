@@ -1,105 +1,138 @@
 import streamlit as st
 from PIL import Image
-from io import BytesIO
+import io
 import base64
-import openai
-from pymongo import MongoClient
-from datetime import datetime
-import pytz
 import time
+import pytz
+from datetime import datetime
+from pymongo import MongoClient
+import openai
+import json
+import re
 
-# --- CONFIGURACIÓN GENERAL ---
-st.set_page_config(page_title="👁️ Visión GPT – Proyecto 10K", layout="wide")
-st.title("👁️ Visión GPT – Proyecto 10K")
+# --- CONFIGURACIÓN ---
+st.set_page_config(page_title="👁️ Proyecto 10K – Visión GPT", layout="centered")
+tz = pytz.timezone("America/Bogota")
 
-# --- SECRETS Y CONEXIONES ---
-openai.api_key = st.secrets["openai_api_key"]
+# --- SECRETS ---
 MONGO_URI = st.secrets["mongo_uri"]
+openai.api_key = st.secrets["openai_api_key"]
+
 client = MongoClient(MONGO_URI)
 db = client["proyecto_10k"]
 col = db["registro_sesiones"]
-tz = pytz.timezone("America/Bogota")
 
-# --- FUNCIONES ---
-def image_to_base64(img: Image.Image) -> str:
-    buffered = BytesIO()
-    img.save(buffered, format="JPEG")
+# --- FUNCIÓN UTILITARIA ---
+def image_to_base64(image: Image.Image) -> str:
+    buffered = io.BytesIO()
+    image.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode()
 
+# --- DETECCIÓN GPT-4o ---
 def detectar_objetos(imagen: Image.Image) -> list:
     try:
         b64 = image_to_base64(imagen)
-        prompt = "Enumera brevemente los objetos visibles en esta imagen como una lista en JSON, sin explicación."
+        prompt = (
+            "Enumera los objetos visibles en la imagen como una lista JSON sin explicaciones, por ejemplo: "
+            '["botella", "teclado", "libreta"]. Solo responde con la lista.'
+        )
+
         respuesta = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": "Eres un asistente que detecta objetos visuales."},
                 {"role": "user", "content": prompt},
-                {"role": "user", "content": f"La imagen codificada es: {b64[:500]}..."}
+                {"role": "user", "content": f"La imagen base64 es: {b64[:500]}..."}
             ],
-            max_tokens=200,
+            max_tokens=150,
             temperature=0.3
         )
-        texto = respuesta.choices[0].message.content
-        objetos = eval(texto)
-        return objetos if isinstance(objetos, list) else []
+
+        texto = respuesta.choices[0].message.content.strip()
+        match = re.search(r"\[(.*?)\]", texto, re.DOTALL)
+        if match:
+            lista = "[" + match.group(1) + "]"
+            objetos = json.loads(lista)
+            return objetos if isinstance(objetos, list) else []
+        return []
     except Exception as e:
         st.error(f"Error en la detección: {e}")
         return []
 
-# --- INTERFAZ ---
-img = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
+# --- CRONÓMETRO ---
+def formato_tiempo(segundos):
+    return time.strftime("%H:%M:%S", time.gmtime(segundos))
 
-if img:
-    imagen = Image.open(img)
-    st.image(imagen, caption="Imagen cargada", use_container_width=True)
-    st.markdown("✅ Imagen cargada")
+# --- INTERFAZ PRINCIPAL ---
+st.title("👁️ Visión GPT-4o – Proyecto 10K")
 
-    if st.button("🔎 Detectar objetos"):
-        objetos_detectados = detectar_objetos(imagen)
+imagen_cargada = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
+if imagen_cargada:
+    st.image(imagen_cargada, caption="Imagen cargada", use_container_width=True)
 
-        if objetos_detectados:
-            st.success("📦 Objetos detectados por IA")
-            seleccionados = []
-            for i, obj in enumerate(objetos_detectados, 1):
-                if st.checkbox(f"{i}. {obj}"):
-                    seleccionados.append(obj)
+    img = Image.open(imagen_cargada)
+    if "objetos_detectados" not in st.session_state:
+        st.session_state.objetos_detectados = detectar_objetos(img)
+        st.session_state.orden_seleccionado = []
+        st.session_state.en_progreso = False
+        st.session_state.inicio = None
+        st.session_state.index_objeto = 0
+        st.session_state.tiempo_objetos = {}
 
-            if seleccionados:
-                if st.button("🟢 Iniciar ordenamiento"):
-                    inicio = datetime.now(tz)
-                    marcador = st.empty()
-                    segundos = 0
+    if st.session_state.objetos_detectados:
+        st.subheader("📦 Objetos detectados:")
+        checks = {}
+        for i, obj in enumerate(st.session_state.objetos_detectados):
+            checks[obj] = st.checkbox(f"{obj}", key=f"check_{i}")
+        
+        seleccionados = [obj for obj, valor in checks.items() if valor]
 
-                    while True:
-                        ahora = datetime.now(tz)
-                        transcurrido = int((ahora - inicio).total_seconds())
-                        marcador.markdown(f"🕒 Tiempo transcurrido: {transcurrido} segundos")
-                        time.sleep(1)
-                        segundos = transcurrido
-                        st.session_state["tiempo"] = segundos
-                        if segundos > 2:  # To break loop for testing
-                            break
+        if seleccionados:
+            orden = st.multiselect("📋 Orden en que serán ubicados:", seleccionados, default=seleccionados)
+            if st.button("🚀 Iniciar organización") and orden:
+                st.session_state.orden_seleccionado = orden
+                st.session_state.en_progreso = True
+                st.session_state.inicio = time.time()
+                st.session_state.index_objeto = 0
+                st.session_state.tiempo_objetos = {}
+                st.rerun()
 
-                    # --- Guardar en MongoDB ---
-                    doc = {
-                        "timestamp": datetime.now(tz),
-                        "objetos": seleccionados,
-                        "duracion_segundos": segundos
-                    }
-                    col.insert_one(doc)
-                    st.success("📝 Sesión registrada exitosamente.")
-        else:
-            st.warning("❌ No se detectaron objetos.")
+    if st.session_state.en_progreso and st.session_state.orden_seleccionado:
+        objeto_actual = st.session_state.orden_seleccionado[st.session_state.index_objeto]
+        st.markdown(f"🎯 Organizando: **{objeto_actual}**")
 
-# --- HISTORIAL ---
-with st.expander("📚 Historial de sesiones"):
-    registros = list(col.find().sort("timestamp", -1).limit(10))
-    if registros:
-        for reg in registros:
-            fecha = reg.get("timestamp", datetime.now()).astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
-            objs = ", ".join(reg.get("objetos", []))
-            dur = reg.get("duracion_segundos", 0)
-            st.markdown(f"• `{fecha}` — ⏱ {dur} seg — 🧩 {objs}")
-    else:
-        st.info("Sin registros aún.")
+        tiempo_actual = int(time.time() - st.session_state.inicio)
+        st.markdown(f"⏱ Tiempo transcurrido: `{formato_tiempo(tiempo_actual)}`")
+
+        if st.button("✅ Ya fue ubicado"):
+            st.session_state.tiempo_objetos[objeto_actual] = tiempo_actual
+            st.session_state.index_objeto += 1
+            st.session_state.inicio = time.time()
+
+            if st.session_state.index_objeto >= len(st.session_state.orden_seleccionado):
+                st.success("🎉 Todos los objetos fueron organizados.")
+                doc = {
+                    "objetos": st.session_state.orden_seleccionado,
+                    "duraciones": st.session_state.tiempo_objetos,
+                    "timestamp": datetime.now(tz)
+                }
+                col.insert_one(doc)
+                st.session_state.en_progreso = False
+                st.rerun()
+            else:
+                st.rerun()
+
+st.divider()
+st.subheader("📚 Historial de sesiones")
+
+historial = list(col.find().sort("timestamp", -1))
+if historial:
+    for reg in historial:
+        fecha = reg["timestamp"].astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
+        st.markdown(f"**🗓️ {fecha}**")
+        for i, obj in enumerate(reg["objetos"], start=1):
+            t = reg["duraciones"].get(obj, 0)
+            st.markdown(f"- {i}. {obj}: `{formato_tiempo(t)}`")
+        st.markdown("---")
+else:
+    st.info("No hay sesiones registradas aún.")
