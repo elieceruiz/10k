@@ -31,6 +31,10 @@ def convertir_imagen_base64(imagen):
     img_b64 = base64.b64encode(buffer.getvalue()).decode()
     return f"data:image/jpeg;base64,{img_b64}"
 
+# === INICIALIZAR SESSION_STATE PARA LA SELECCIÓN ORDENADA ===
+if "seleccionados" not in st.session_state:
+    st.session_state.seleccionados = []
+
 # === SUBIDA DE IMAGEN ===
 uploaded_file = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
 if uploaded_file:
@@ -56,30 +60,45 @@ if uploaded_file:
                 contenido = respuesta.choices[0].message.content
                 objetos = [obj.strip("-• ") for obj in contenido.split("\n") if obj.strip()]
 
+                # REINICIAR LISTA DE SELECCIONADOS SI HAY NUEVA DETECCIÓN
+                st.session_state.seleccionados = []
+
                 if objetos:
                     st.success("✅ Objetos detectados:")
                     st.write(objetos)
 
-                    # ✅ CHECKBOXES INTERACTIVOS
-                    st.markdown("**🖱️ Marca los elementos libremente:**")
-                    for i, obj in enumerate(objetos):
-                        st.checkbox(label=obj, key=f"chk_{i}", value=False)
-
-                    # ✅ BOTÓN PARA GUARDAR SESIÓN
-                    if st.button("💾 Guardar sesión"):
-                        doc = {
-                            "timestamp": datetime.now(tz),
-                            "objetos": objetos,
-                            "nombre_archivo": uploaded_file.name
-                        }
-                        col.insert_one(doc)
-                        st.success("✅ Sesión guardada en la base de datos.")
+                    st.session_state.objetos_actuales = objetos
 
                 else:
                     st.warning("⚠️ No se detectaron objetos en la imagen.")
 
             except Exception as e:
                 st.error(f"Error en la detección: {e}")
+
+# === INTERFAZ DE SELECCIÓN CON CHECKBOXES Y MULTISELECT ===
+if "objetos_actuales" in st.session_state:
+    restantes = [obj for obj in st.session_state.objetos_actuales if obj not in st.session_state.seleccionados]
+
+    st.markdown("**🖱️ Marca los elementos para la tarea monotarea:**")
+    for i, obj in enumerate(restantes):
+        if st.checkbox(obj, key=f"chk_{obj}"):
+            st.session_state.seleccionados.append(obj)
+            st.experimental_rerun()  # Refresca para ocultar el ya seleccionado
+
+    if st.session_state.seleccionados:
+        seleccionados_numerados = [f"{i+1}. {item}" for i, item in enumerate(st.session_state.seleccionados)]
+        st.markdown("**📋 Orden de ejecución:**")
+        st.multiselect("Seleccionados:", options=seleccionados_numerados, default=seleccionados_numerados, disabled=True)
+
+    # === BOTÓN DE GUARDADO MANUAL ===
+    if st.button("💾 Guardar sesión"):
+        doc = {
+            "timestamp": datetime.now(tz),
+            "objetos": st.session_state.objetos_actuales,
+            "nombre_archivo": uploaded_file.name
+        }
+        col.insert_one(doc)
+        st.success("✅ Sesión guardada en la base de datos.")
 
 # === HISTORIAL DE SESIONES ===
 st.subheader("📚 Historial de sesiones")
