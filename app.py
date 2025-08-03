@@ -34,67 +34,72 @@ if imagen_subida:
     img_b64 = base64.b64encode(buffered.getvalue()).decode()
     data_url = f"data:image/jpeg;base64,{img_b64}"
 
-    # Procesamiento con GPT-4o vision
-    with st.spinner("🔍 Detectando objetos con GPT-4o..."):
-        try:
-            respuesta = openai.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "image_url", "image_url": {"url": data_url}},
-                            {"type": "text", "text": "Devuélveme una lista de los objetos visibles en la imagen, separados por comas. No escribas explicaciones ni introducciones."}
-                        ]
-                    }
-                ],
-                max_tokens=100,
-                temperature=0.2,
-            )
+    # === DETECTAR SOLO UNA VEZ ===
+    if "objetos_detectados" not in st.session_state:
+        with st.spinner("🔍 Detectando objetos con GPT-4o..."):
+            try:
+                respuesta = openai.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "image_url", "image_url": {"url": data_url}},
+                                {"type": "text", "text": "Devuélveme una lista de los objetos visibles en la imagen, separados por comas. No escribas explicaciones ni introducciones."}
+                            ]
+                        }
+                    ],
+                    max_tokens=100,
+                    temperature=0.2,
+                )
 
-            contenido = respuesta.choices[0].message.content
-            objetos_detectados = [x.strip() for x in contenido.split(",") if x.strip()]
-            st.success("✅ Objetos detectados por IA:")
-            st.write(objetos_detectados)
+                contenido = respuesta.choices[0].message.content
+                objetos = [x.strip() for x in contenido.split(",") if x.strip()]
+                st.session_state.objetos_detectados = objetos
 
-            # Mostrar checkboxes
-            st.markdown("### ✅ Organiza:")
-            orden_usuario = []
-            for idx, obj in enumerate(objetos_detectados):
-                if st.checkbox(obj, key=obj):
-                    orden_usuario.append(obj)
+                # Guardar en Mongo
+                col_registros.insert_one({
+                    "timestamp": datetime.utcnow(),
+                    "objetos_detectados": objetos,
+                    "tokens_usados": 100
+                })
+                col_uso.insert_one({
+                    "fecha": datetime.utcnow(),
+                    "api_key_usada": openai.api_key[-6:],
+                    "tokens_estimados": 100
+                })
 
-            # Cronómetro y control
-            if orden_usuario:
-                if st.button("🕐 Iniciar sesión de orden"):
-                    start_time = datetime.utcnow()
-                    st.session_state["tiempo_inicio"] = time.time()
-                    st.success("⏱️ Cronómetro iniciado...")
+            except openai.RateLimitError:
+                st.error("🚫 Has superado el límite de uso de la API de OpenAI.")
+            except openai.AuthenticationError:
+                st.error("❌ API Key inválida o no autorizada.")
+            except Exception as e:
+                st.error(f"⚠️ Error inesperado: {e}")
 
-            if "tiempo_inicio" in st.session_state:
-                tiempo_actual = time.time()
-                duracion = int(tiempo_actual - st.session_state["tiempo_inicio"])
-                st.info(f"⏳ Tiempo: {duracion // 60:02d}:{duracion % 60:02d}")
+# === MOSTRAR RESULTADOS ===
+if "objetos_detectados" in st.session_state:
+    objetos_detectados = st.session_state.objetos_detectados
+    st.success("✅ Objetos detectados por IA:")
+    st.write(objetos_detectados)
 
-            # Guardar en Mongo
-            doc = {
-                "timestamp": datetime.utcnow(),
-                "objetos_detectados": objetos_detectados,
-                "orden_usuario": orden_usuario,
-                "tokens_usados": 100
-            }
-            col_registros.insert_one(doc)
-            col_uso.insert_one({
-                "fecha": datetime.utcnow(),
-                "api_key_usada": openai.api_key[-6:],
-                "tokens_estimados": 100
-            })
+    st.markdown("### ✅ Organiza:")
 
-        except openai.RateLimitError:
-            st.error("🚫 Has superado el límite de uso de la API de OpenAI.")
-        except openai.AuthenticationError:
-            st.error("❌ API Key inválida o no autorizada.")
-        except Exception as e:
-            st.error(f"⚠️ Error inesperado: {e}")
-else:
-    st.info("📷 Carga una imagen para comenzar.")
+    orden_usuario = []
+    for idx, obj in enumerate(objetos_detectados):
+        if st.checkbox(obj, key=f"check_{idx}"):
+            orden_usuario.append(obj)
+
+    if orden_usuario and st.button("🕐 Iniciar sesión de orden"):
+        st.session_state["tiempo_inicio"] = time.time()
+        st.session_state["orden_usuario"] = orden_usuario
+        st.success("⏱️ Cronómetro iniciado...")
+
+    if "tiempo_inicio" in st.session_state:
+        tiempo_actual = time.time()
+        duracion = int(tiempo_actual - st.session_state["tiempo_inicio"])
+        minutos, segundos = divmod(duracion, 60)
+        st.info(f"🧭 Tiempo transcurrido: {minutos:02d}:{segundos:02d}")
+
+        st.markdown("### 📦 Elementos seleccionados:")
+        for i, item in enumerate(st.session_state["orden_usuario"], 1):
+            st.markdown(f"- {i}. {item}")
