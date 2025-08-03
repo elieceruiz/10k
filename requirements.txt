@@ -1,6 +1,6 @@
 streamlit
-pymongo[srv]
-openai
+pymongo
 pillow
 python-dotenv
+openai
 pytz
