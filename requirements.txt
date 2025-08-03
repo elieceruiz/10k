@@ -1,3 +1,5 @@
 streamlit
-openai
 pymongo
+openai
+pillow
+python-dotenv
