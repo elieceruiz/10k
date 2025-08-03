@@ -87,20 +87,23 @@ with tab1:
             st.markdown("**📋 Orden de ejecución:**")
             st.multiselect("Seleccionados:", options=seleccionados_numerados, default=seleccionados_numerados, disabled=True)
 
-        if st.button("🧘 Empezamos a ordenar"):
-            imagen_b64 = convertir_imagen_base64(imagen)
-            doc = {
-                "timestamp": datetime.now(tz),
-                "objetos": st.session_state.objetos_actuales,
-                "nombre_archivo": uploaded_file.name,
-                "imagen_b64": imagen_b64
-            }
-            inserted = col.insert_one(doc)
-            st.session_state.mongo_id = inserted.inserted_id
-            st.session_state.tareas_zen = st.session_state.seleccionados.copy()
-            st.session_state.indice_actual = 0
-            st.session_state.modo_zen = True
-            st.experimental_rerun()
+        if not st.session_state.get("modo_zen", False):
+            if st.button("🧘 Empezamos a ordenar"):
+                imagen_b64 = convertir_imagen_base64(imagen)
+                doc = {
+                    "timestamp": datetime.now(tz),
+                    "objetos": st.session_state.objetos_actuales,
+                    "nombre_archivo": uploaded_file.name,
+                    "imagen_b64": imagen_b64
+                }
+                inserted = col.insert_one(doc)
+                st.session_state.mongo_id = inserted.inserted_id
+                st.session_state.tareas_zen = st.session_state.seleccionados.copy()
+                st.session_state.indice_actual = 0
+                st.session_state.modo_zen = True
+                st.rerun()
+        else:
+            st.success("✅ Todo listo. Ve a la pestaña **⏱️ Tiempo en vivo** para comenzar.")
 
 # === TAB 2: TIEMPO EN VIVO ===
 with tab2:
