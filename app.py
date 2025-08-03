@@ -30,24 +30,24 @@ def convertir_imagen_base64(imagen):
     return base64.b64encode(buffer.getvalue()).decode()
 
 # === SESSION STATE ===
-for key in ["seleccionados", "modo_zen", "tareas_zen", "indice_actual", "cronometro_inicio", "tiempos_zen", "mongo_id", "objetos_actuales", "imagen_cargada", "nombre_archivo"]:
+for key in ["seleccionados", "modo_zen", "tareas_zen", "indice_actual", "cronometro_inicio", "tiempos_zen", "mongo_id", "imagen_cargada", "nombre_archivo", "objetos_actuales"]:
     if key not in st.session_state:
-        if key in ["seleccionados", "objetos_actuales", "tiempos_zen", "tareas_zen"]:
-            st.session_state[key] = []
-        else:
-            st.session_state[key] = None
+        st.session_state[key] = None if key != "seleccionados" else []
+
+if "file_uploader_key" not in st.session_state:
+    st.session_state["file_uploader_key"] = "uploader_0"
 
 # === PESTAÑAS ===
 tab1, tab2, tab3 = st.tabs(["🔍 Detección", "⏱️ Tiempo en vivo", "📚 Historial"])
 
 # === TAB 1: DETECCIÓN ===
 with tab1:
-    uploaded_file = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
+    uploaded_file = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"], key=st.session_state["file_uploader_key"])
     if uploaded_file:
         imagen = Image.open(uploaded_file)
-        st.session_state["imagen_cargada"] = imagen
-        st.session_state["nombre_archivo"] = uploaded_file.name
         st.image(imagen, caption="✅ Imagen cargada", use_container_width=True)
+        st.session_state.imagen_cargada = imagen
+        st.session_state.nombre_archivo = uploaded_file.name
 
         if st.button("🔍 Detectar objetos"):
             with st.spinner("Analizando imagen con GPT-4o..."):
@@ -92,12 +92,11 @@ with tab1:
             st.markdown("**📋 Orden de ejecución:**")
             st.multiselect("Seleccionados:", options=seleccionados_numerados, default=seleccionados_numerados, disabled=True)
 
-        if not st.session_state.get("modo_zen", False):
-            if st.button("🧘 Empezamos a ordenar"):
-                st.warning("⏳ Ejecutando guardado...")
-                if st.session_state["imagen_cargada"] is None:
-                    st.error("❌ No se encontró la imagen cargada.")
-                else:
+        if st.button("🧘 Empezamos a ordenar"):
+            if st.session_state["imagen_cargada"] is None:
+                st.error("❌ No se encontró la imagen cargada.")
+            else:
+                with st.spinner("⏳ Guardando sesión y preparando modo zen..."):
                     imagen_b64 = convertir_imagen_base64(st.session_state["imagen_cargada"])
                     doc = {
                         "timestamp": datetime.now(tz),
@@ -110,15 +109,17 @@ with tab1:
                     st.session_state.tareas_zen = st.session_state.seleccionados.copy()
                     st.session_state.indice_actual = 0
                     st.session_state.modo_zen = True
-                    # LIMPIAR
+
+                    # Restaurar pestaña 1 sin afectar pestaña 2
                     st.session_state.seleccionados = []
                     st.session_state.objetos_actuales = []
                     st.session_state.imagen_cargada = None
                     st.session_state.nombre_archivo = None
-                    st.success("✅ Guardado. Ahora ve a la pestaña de tiempo.")
+                    st.session_state["file_uploader_key"] = str(datetime.now().timestamp())
+
+                    st.success("✅ Guardado. Ve a la pestaña **⏱️ Tiempo en vivo** para comenzar.")
+                    time.sleep(1)
                     st.rerun()
-        else:
-            st.success("✅ Todo listo. Ve a la pestaña **⏱️ Tiempo en vivo** para comenzar.")
 
 # === TAB 2: TIEMPO EN VIVO ===
 with tab2:
