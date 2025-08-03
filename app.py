@@ -58,9 +58,18 @@ if uploaded_file:
 
                 if objetos:
                     st.success("✅ Objetos detectados:")
-                    # ✅ MOSTRAR CADA OBJETO COMO CHECKBOX (NO SELECCIONADO)
+
+                    # ✅ CHECKBOXES INDIVIDUALES
+                    seleccionados = []
                     for i, obj in enumerate(objetos):
-                        st.checkbox(obj, key=f"obj_{i}", value=False)
+                        if st.checkbox(obj, key=f"obj_{i}", value=False):
+                            seleccionados.append(obj)
+
+                    # ✅ LISTA NUMERADA EN EXPANDER
+                    if seleccionados:
+                        with st.expander("🔢 Ver lista numerada de seleccionados"):
+                            for idx, item in enumerate(seleccionados, start=1):
+                                st.markdown(f"**{idx}.** {item}")
 
                     # REGISTRO EN MONGO
                     doc = {
