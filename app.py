@@ -42,7 +42,7 @@ with tab1:
     uploaded_file = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
     if uploaded_file:
         imagen = Image.open(uploaded_file)
-        st.session_state["imagen_cargada"] = imagen  # Guardar imagen
+        st.session_state["imagen_cargada"] = imagen
         st.session_state["nombre_archivo"] = uploaded_file.name
         st.image(imagen, caption="✅ Imagen cargada", use_container_width=True)
 
@@ -91,19 +91,24 @@ with tab1:
 
         if not st.session_state.get("modo_zen", False):
             if st.button("🧘 Empezamos a ordenar"):
-                imagen_b64 = convertir_imagen_base64(st.session_state["imagen_cargada"])
-                doc = {
-                    "timestamp": datetime.now(tz),
-                    "objetos": st.session_state.objetos_actuales,
-                    "nombre_archivo": st.session_state["nombre_archivo"],
-                    "imagen_b64": imagen_b64
-                }
-                inserted = col.insert_one(doc)
-                st.session_state.mongo_id = inserted.inserted_id
-                st.session_state.tareas_zen = st.session_state.seleccionados.copy()
-                st.session_state.indice_actual = 0
-                st.session_state.modo_zen = True
-                st.rerun()
+                st.warning("⏳ Ejecutando guardado...")  # VERIFICACIÓN
+                if "imagen_cargada" not in st.session_state:
+                    st.error("❌ No se encontró la imagen cargada.")
+                else:
+                    imagen_b64 = convertir_imagen_base64(st.session_state["imagen_cargada"])
+                    doc = {
+                        "timestamp": datetime.now(tz),
+                        "objetos": st.session_state.objetos_actuales,
+                        "nombre_archivo": st.session_state["nombre_archivo"],
+                        "imagen_b64": imagen_b64
+                    }
+                    inserted = col.insert_one(doc)
+                    st.session_state.mongo_id = inserted.inserted_id
+                    st.session_state.tareas_zen = st.session_state.seleccionados.copy()
+                    st.session_state.indice_actual = 0
+                    st.session_state.modo_zen = True
+                    st.success("✅ Guardado. Ahora ve a la pestaña de tiempo.")
+                    st.rerun()
         else:
             st.success("✅ Todo listo. Ve a la pestaña **⏱️ Tiempo en vivo** para comenzar.")
 
@@ -123,7 +128,7 @@ with tab2:
                     st.experimental_rerun()
             else:
                 tiempo_transcurrido = datetime.now(tz) - st.session_state.cronometro_inicio
-                tiempo_str = str(tiempo_transcurrido).split(".")[0]
+                tiempo_str = str(tiempo_transcurrado).split(".")[0]
                 st.info(f"⏱ Tiempo: {tiempo_str}")
 
                 if st.button("✅ Tarea completada", key=f"done_{idx}"):
