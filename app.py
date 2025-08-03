@@ -7,6 +7,7 @@ from datetime import datetime
 import pytz
 from pymongo import MongoClient
 import openai
+import re
 
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="👁️ Visión GPT – Proyecto 10K", layout="centered")
@@ -30,15 +31,15 @@ imagen = st.file_uploader("Arrastra o selecciona una imagen", type=["jpg", "jpeg
 if imagen:
     st.image(imagen, caption="Imagen cargada", use_container_width=True)
 
-    # Procesar solo si no se ha hecho antes
     if "objetos_detectados" not in st.session_state:
         bytes_imagen = imagen.read()
         imagen_base64 = base64.b64encode(bytes_imagen).decode("utf-8")
         prompt = f"""
-Eres un asistente de visión artificial. Detecta SOLO los objetos claramente visibles en esta imagen en base64, devuélvelos como lista JSON simple, sin descripciones. Ejemplo: ["maleta", "celular", "cuaderno"]
-Imagen base64 (recortada):
+Detecta SOLO los objetos visibles en esta imagen en base64. Devuelve la respuesta como una lista Python válida, sin texto adicional. Ejemplo: ["maleta", "celular"]
+Imagen:
 {imagen_base64[:4000]}...
 """
+
         try:
             respuesta = openai.chat.completions.create(
                 model="gpt-4o",
@@ -47,9 +48,15 @@ Imagen base64 (recortada):
                 max_tokens=150
             )
             texto = respuesta.choices[0].message.content.strip()
-            st.session_state.objetos_detectados = eval(texto)
-            st.session_state.imagen_bytes = bytes_imagen
-            st.success("✅ Objetos detectados por IA.")
+            match = re.search(r"\[.*?\]", texto, re.DOTALL)
+
+            if match:
+                lista_objetos = eval(match.group(0))
+                st.session_state.objetos_detectados = lista_objetos
+                st.session_state.imagen_bytes = bytes_imagen
+                st.success("✅ Objetos detectados por IA.")
+            else:
+                st.error("❌ No se pudo extraer una lista válida de objetos.")
         except Exception as e:
             st.error(f"❌ Error en la detección: {e}")
 
@@ -82,7 +89,6 @@ if "objetos_detectados" in st.session_state:
             if st.button(f"✅ Finalizar {obj}", key=f"finalizar_{obj}"):
                 fin = time.time()
                 duracion = int(fin - st.session_state[obj]["inicio"])
-                # Guardar en Mongo
                 doc = {
                     "objeto": obj,
                     "duracion_segundos": duracion,
@@ -92,7 +98,6 @@ if "objetos_detectados" in st.session_state:
                 }
                 col.insert_one(doc)
                 st.success(f"✔️ Registrado: {obj} – {duracion} segundos")
-                # Resetear estado del objeto
                 st.session_state[obj] = {"iniciado": False, "inicio": None, "duracion": duracion}
                 st.rerun()
 
