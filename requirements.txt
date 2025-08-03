@@ -1,3 +1,6 @@
 streamlit
+pymongo
 openai
 pillow
+pytz
+python-dotenv
