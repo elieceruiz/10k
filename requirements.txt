@@ -1,4 +1,3 @@
 streamlit
-openai>=1.3.8
+openai
 pymongo
-requests
