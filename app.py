@@ -63,24 +63,34 @@ tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección",
 
 # === TAB MIGRACIÓN ===
 with tab_migracion:
-    st.subheader("🧪 Área de pruebas para migraciones")
+    st.subheader("🧪 Captura desde cámara (modo directo)")
 
-    st.markdown("[📷 Tomar foto con la cámara](#)", unsafe_allow_html=True)
+    # Clase que transforma y guarda el último frame como imagen
+    class CameraProcessor(VideoTransformerBase):
+        def __init__(self):
+            self.last_frame = None
 
-    archivo = st.file_uploader(
-        "Toca aquí para tomar la foto (preferiblemente desde el móvil)",
-        type=["jpg"],
-        accept_multiple_files=False,
-        key="migracion_camara",
-        label_visibility="collapsed"
+        def transform(self, frame):
+            self.last_frame = frame.to_image()
+            return frame
+
+    # Componente de cámara en vivo
+    ctx = webrtc_streamer(
+        key="camera",
+        mode="SENDRECV",
+        desired_playing_state=True,
+        video_transformer_factory=CameraProcessor,
+        media_stream_constraints={"video": True, "audio": False},
     )
 
-    if archivo:
-        imagen = Image.open(archivo)
-        st.image(imagen, caption="✅ Imagen tomada", use_container_width=True)
-        st.session_state.imagen_migracion = imagen  # por si se usa luego
+    # Mostrar botón solo si hay frame disponible
+    if ctx.video_transformer and ctx.video_transformer.last_frame is not None:
+        if st.button("📸 Tomar foto"):
+            imagen = ctx.video_transformer.last_frame
+            st.image(imagen, caption="✅ Foto tomada", use_container_width=True)
+            st.session_state.imagen_migracion = imagen  # Guardamos en el estado para luego analizar
 
-        st.button("🔍 Analizar con GPT-4o")  # aún sin función
+            st.button("🔍 Analizar con GPT-4o")  # Botón aún sin lógica activa
 
 # === TAB 1: DETECCIÓN ===
 with tab1:
