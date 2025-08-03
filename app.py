@@ -83,7 +83,7 @@ if "objetos_actuales" in st.session_state:
     for i, obj in enumerate(restantes):
         if st.checkbox(obj, key=f"chk_{obj}"):
             st.session_state.seleccionados.append(obj)
-            st.experimental_rerun()  # Refresca para ocultar el ya seleccionado
+            st.rerun()  # ✅ CORRECTO
 
     if st.session_state.seleccionados:
         seleccionados_numerados = [f"{i+1}. {item}" for i, item in enumerate(st.session_state.seleccionados)]
