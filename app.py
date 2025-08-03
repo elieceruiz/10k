@@ -58,9 +58,9 @@ if uploaded_file:
 
                 if objetos:
                     st.success("✅ Objetos detectados:")
-                    # ✅ MOSTRAR CADA OBJETO COMO CHECKBOX
+                    # ✅ MOSTRAR CADA OBJETO COMO CHECKBOX (NO SELECCIONADO)
                     for i, obj in enumerate(objetos):
-                        st.checkbox(obj, key=f"obj_{i}", value=True)
+                        st.checkbox(obj, key=f"obj_{i}", value=False)
 
                     # REGISTRO EN MONGO
                     doc = {
