@@ -66,6 +66,8 @@ if "inicio_captura_migracion" not in st.session_state:
     st.session_state.inicio_captura_migracion = datetime.now(tz)
 if "objetos_migracion" not in st.session_state:
     st.session_state.objetos_migracion = []
+if "imagen_migracion" not in st.session_state:
+    st.session_state.imagen_migracion = None
 
 with tab_migracion:
     st.subheader("🧪 Captura directa (fluida y mínima)")
@@ -83,6 +85,8 @@ with tab_migracion:
         duracion = (fin - st.session_state.inicio_captura_migracion).total_seconds()
 
         imagen = Image.open(archivo)
+        st.session_state.imagen_migracion = imagen  # guardamos para análisis posterior
+
         st.image(imagen, caption="✅ Foto tomada", use_container_width=True)
         st.success(f"⏱️ Tiempo desde carga: {round(duracion, 2)} segundos")
 
@@ -95,41 +99,45 @@ with tab_migracion:
         col_migracion.insert_one(doc)
         st.success("📥 Guardado automático en MongoDB")
 
-        if not st.session_state.objetos_migracion:
-            if st.button("🔍 Analizar con GPT-4o"):
-                with st.spinner("Analizando con GPT-4o..."):
-                    try:
-                        b64_img = "data:image/jpeg;base64," + imagen_b64
-                        respuesta = openai.chat.completions.create(
-                            model="gpt-4o",
-                            messages=[
-                                {"role": "user", "content": [
-                                    {
-                                        "type": "text",
-                                        "text": "Detecta solo objetos visibles. Devuelve una lista breve, sin descripciones largas ni contexto adicional ni explicaciones. Solo los objetos."
-                                    },
-                                    {"type": "image_url", "image_url": {"url": b64_img}}
-                                ]}
-                            ],
-                            max_tokens=200,
-                            temperature=0.3
-                        )
-                        objetos_raw = respuesta.choices[0].message.content
-                        objetos = [obj.strip("-• ").capitalize() for obj in objetos_raw.split("\n") if obj.strip()]
-                        if objetos:
-                            st.session_state.objetos_migracion = objetos
-                            st.success("✅ Objetos detectados:")
-                            st.write(objetos)
-                        else:
-                            st.warning("⚠️ No se detectaron objetos.")
-                    except Exception as e:
-                        st.error(f"Error durante la detección: {e}")
-        else:
-            st.success("✅ Objetos ya detectados:")
-            st.write(st.session_state.objetos_migracion)
+        st.session_state.inicio_captura_migracion = datetime.now(tz)  # reinicia el cronómetro
 
-        # Reiniciar tiempo de captura para una futura foto
-        st.session_state.inicio_captura_migracion = datetime.now(tz)
+    # === ANÁLISIS SOLO SI HAY IMAGEN GUARDADA ===
+    if st.session_state.imagen_migracion:
+        if st.button("🔍 Analizar con GPT-4o"):
+            with st.spinner("Conectando con GPT-4o..."):
+                try:
+                    img_b64 = convertir_imagen_base64(st.session_state.imagen_migracion)
+                    b64_img_url = "data:image/jpeg;base64," + img_b64
+
+                    respuesta = openai.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[
+                            {"role": "user", "content": [
+                                {
+                                    "type": "text",
+                                    "text": "Detecta solo objetos visibles. Devuelve una lista breve, sin descripciones largas ni contexto adicional ni explicaciones. Solo los objetos."
+                                },
+                                {"type": "image_url", "image_url": {"url": b64_img_url}}
+                            ]}
+                        ],
+                        max_tokens=200,
+                        temperature=0.3
+                    )
+
+                    objetos_raw = respuesta.choices[0].message.content
+                    objetos = [obj.strip("-• ").capitalize() for obj in objetos_raw.split("\n") if obj.strip()]
+                    st.session_state.objetos_migracion = objetos
+
+                    if objetos:
+                        st.success("✅ Objetos detectados:")
+                        st.write(objetos)
+                    else:
+                        st.warning("⚠️ No se detectaron objetos.")
+                except Exception as e:
+                    st.error(f"Error durante la detección: {e}")
+
+    elif st.button("🔍 Analizar con GPT-4o", disabled=True):
+        st.info("Primero toma una foto para poder analizarla.")
 
 # === TAB 1: DETECCIÓN ===
 with tab1:
