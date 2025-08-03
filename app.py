@@ -31,9 +31,10 @@ def convertir_imagen_base64(imagen):
     img_b64 = base64.b64encode(buffer.getvalue()).decode()
     return f"data:image/jpeg;base64,{img_b64}"
 
-# === INICIALIZAR SESSION_STATE PARA LA SELECCIÓN ORDENADA ===
-if "seleccionados" not in st.session_state:
-    st.session_state.seleccionados = []
+# === SESSION STATE ===
+for key in ["seleccionados", "modo_zen", "tareas_zen", "indice_actual", "cronometro_inicio", "tiempos_zen", "mongo_id"]:
+    if key not in st.session_state:
+        st.session_state[key] = None if key != "seleccionados" else []
 
 # === SUBIDA DE IMAGEN ===
 uploaded_file = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
@@ -56,49 +57,83 @@ if uploaded_file:
                     max_tokens=300,
                 )
 
-                # EXTRAER OBJETOS
                 contenido = respuesta.choices[0].message.content
                 objetos = [obj.strip("-• ") for obj in contenido.split("\n") if obj.strip()]
-
-                # REINICIAR LISTA DE SELECCIONADOS SI HAY NUEVA DETECCIÓN
                 st.session_state.seleccionados = []
-
+                st.session_state.objetos_actuales = objetos
+                st.session_state.modo_zen = False
+                st.session_state.tiempos_zen = []
+                st.session_state.mongo_id = None
                 if objetos:
                     st.success("✅ Objetos detectados:")
                     st.write(objetos)
-
-                    st.session_state.objetos_actuales = objetos
-
                 else:
                     st.warning("⚠️ No se detectaron objetos en la imagen.")
-
             except Exception as e:
                 st.error(f"Error en la detección: {e}")
 
-# === INTERFAZ DE SELECCIÓN CON CHECKBOXES Y MULTISELECT ===
-if "objetos_actuales" in st.session_state:
-    restantes = [obj for obj in st.session_state.objetos_actuales if obj not in st.session_state.seleccionados]
+# === MODO ZEN ===
+if st.session_state.modo_zen:
+    tareas = st.session_state.tareas_zen
+    idx = st.session_state.indice_actual
 
-    st.markdown("**🖱️ Marca los elementos para la tarea monotarea:**")
-    for i, obj in enumerate(restantes):
-        if st.checkbox(obj, key=f"chk_{obj}"):
-            st.session_state.seleccionados.append(obj)
-            st.rerun()  # ✅ CORRECTO
+    if idx < len(tareas):
+        tarea = tareas[idx]
+        st.header(f"🧘 Tarea {idx + 1} de {len(tareas)}: {tarea}")
 
-    if st.session_state.seleccionados:
-        seleccionados_numerados = [f"{i+1}. {item}" for i, item in enumerate(st.session_state.seleccionados)]
-        st.markdown("**📋 Orden de ejecución:**")
-        st.multiselect("Seleccionados:", options=seleccionados_numerados, default=seleccionados_numerados, disabled=True)
+        if st.session_state.cronometro_inicio is None:
+            if st.button("🎯 Empezar tarea"):
+                st.session_state.cronometro_inicio = datetime.now(tz)
+                st.rerun()
+        else:
+            tiempo_transcurrido = datetime.now(tz) - st.session_state.cronometro_inicio
+            st.info(f"⏱ Tiempo: {str(tiempo_transcurrido).split('.')[0]}")
+            if st.button("✅ Tarea completada"):
+                fin = datetime.now(tz)
+                st.session_state.tiempos_zen.append({
+                    "nombre": tarea,
+                    "tiempo_inicio": st.session_state.cronometro_inicio.isoformat(),
+                    "tiempo_fin": fin.isoformat(),
+                    "duracion_segundos": (fin - st.session_state.cronometro_inicio).total_seconds()
+                })
+                st.session_state.indice_actual += 1
+                st.session_state.cronometro_inicio = None
+                st.rerun()
+    else:
+        st.success("🎉 Modo zen completado. Tiempos registrados.")
+        if st.session_state.mongo_id:
+            col.update_one(
+                {"_id": st.session_state.mongo_id},
+                {"$set": {"tiempos_zen": st.session_state.tiempos_zen}}
+            )
+        else:
+            st.warning("No se encontró ID de sesión para guardar los tiempos.")
+else:
+    if "objetos_actuales" in st.session_state:
+        restantes = [obj for obj in st.session_state.objetos_actuales if obj not in st.session_state.seleccionados]
+        st.markdown("**🖱️ Marca los elementos para la tarea monotarea:**")
+        for i, obj in enumerate(restantes):
+            if st.checkbox(obj, key=f"chk_{obj}"):
+                st.session_state.seleccionados.append(obj)
+                st.rerun()
 
-    # === BOTÓN DE GUARDADO MANUAL ===
-    if st.button("💾 Guardar sesión"):
-        doc = {
-            "timestamp": datetime.now(tz),
-            "objetos": st.session_state.objetos_actuales,
-            "nombre_archivo": uploaded_file.name
-        }
-        col.insert_one(doc)
-        st.success("✅ Sesión guardada en la base de datos.")
+        if st.session_state.seleccionados:
+            seleccionados_numerados = [f"{i+1}. {item}" for i, item in enumerate(st.session_state.seleccionados)]
+            st.markdown("**📋 Orden de ejecución:**")
+            st.multiselect("Seleccionados:", options=seleccionados_numerados, default=seleccionados_numerados, disabled=True)
+
+        if st.button("🧘 Empezamos a ordenar"):
+            doc = {
+                "timestamp": datetime.now(tz),
+                "objetos": st.session_state.objetos_actuales,
+                "nombre_archivo": uploaded_file.name
+            }
+            inserted = col.insert_one(doc)
+            st.session_state.mongo_id = inserted.inserted_id
+            st.session_state.tareas_zen = st.session_state.seleccionados.copy()
+            st.session_state.indice_actual = 0
+            st.session_state.modo_zen = True
+            st.rerun()
 
 # === HISTORIAL DE SESIONES ===
 st.subheader("📚 Historial de sesiones")
@@ -110,6 +145,10 @@ if registros:
         st.write("📦 Objetos detectados:")
         for i, obj in enumerate(reg.get("objetos", []), 1):
             st.write(f"- {obj}")
+        if "tiempos_zen" in reg:
+            st.markdown("⏱️ **Modo zen:**")
+            for i, t in enumerate(reg["tiempos_zen"], 1):
+                st.write(f"{i}. {t['nombre']} – {round(t['duracion_segundos'])}s")
         st.markdown("---")
 else:
     st.info("No hay sesiones completas registradas aún.")
