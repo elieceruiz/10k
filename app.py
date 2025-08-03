@@ -7,6 +7,7 @@ from io import BytesIO
 import openai
 import pytz
 import time
+from streamlit_javascript import st_javascript
 
 # === CONFIGURACIÓN DE LA APP ===
 st.set_page_config(page_title="Visión GPT-4o – Proyecto 10K", layout="wide")
@@ -44,7 +45,7 @@ for key in ["seleccionados", "modo_zen", "tareas_zen", "indice_actual", "cronome
 if "file_uploader_key" not in st.session_state:
     st.session_state["file_uploader_key"] = "uploader_0"
 
-# === RESUMEN TOTAL DE TIEMPOS ===
+# === TIEMPO TOTAL GLOBAL ===
 total_segundos = 0
 for reg in col.find({"tiempos_zen": {"$exists": True}}):
     for entrada in reg["tiempos_zen"]:
@@ -56,10 +57,10 @@ progreso = min(total_horas / 10000, 1.0)
 st.markdown(f"### ⏳ Progreso total: **{round(total_horas, 2)} / 10.000 horas**")
 st.progress(progreso)
 
-# === PESTAÑAS ===
+# === TABS ===
 tab1, tab2, tab3 = st.tabs(["🔍 Detección", "⏱️ Tiempo en vivo", "📚 Historial"])
 
-# === TAB 1: DETECCIÓN ===
+# === TAB 1 ===
 with tab1:
     uploaded_file = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"], key=st.session_state["file_uploader_key"])
     if uploaded_file:
@@ -89,22 +90,21 @@ with tab1:
                     st.session_state.modo_zen = False
                     st.session_state.tiempos_zen = []
                     st.session_state.mongo_id = None
-
-                    if objetos:
-                        st.success("✅ Objetos detectados:")
-                        st.write(objetos)
-                    else:
-                        st.warning("⚠️ No se detectaron objetos en la imagen.")
+                    st.success("✅ Objetos detectados:")
+                    st.write(objetos)
                 except Exception as e:
                     st.error(f"Error en la detección: {e}")
 
     if st.session_state.objetos_actuales:
         restantes = [obj for obj in st.session_state.objetos_actuales if obj not in st.session_state.seleccionados]
         st.markdown("**🖱️ Marca los elementos para la tarea monotarea:**")
-        for obj in restantes:
-            if st.checkbox(obj, key=f"chk_{obj}"):
+
+        def seleccionar_objeto(obj):
+            if obj not in st.session_state.seleccionados:
                 st.session_state.seleccionados.append(obj)
-                st.rerun()
+
+        for obj in restantes:
+            st.checkbox(obj, key=f"chk_{obj}", on_change=seleccionar_objeto, args=(obj,))
 
         if st.session_state.seleccionados:
             seleccionados_numerados = [f"{i+1}. {item}" for i, item in enumerate(st.session_state.seleccionados)]
@@ -129,36 +129,46 @@ with tab1:
                     st.session_state.tareas_zen = st.session_state.seleccionados.copy()
                     st.session_state.indice_actual = 0
                     st.session_state.modo_zen = True
-
-                    # Restaurar pestaña 1 sin afectar pestaña 2
+                    # Reset de detección
                     st.session_state.seleccionados = []
                     st.session_state.objetos_actuales = []
                     st.session_state.imagen_cargada = None
                     st.session_state.nombre_archivo = None
                     st.session_state["file_uploader_key"] = str(datetime.now().timestamp())
-
                     st.success("✅ Guardado. Ve a la pestaña **⏱️ Tiempo en vivo** para comenzar.")
-                    time.sleep(1)
-                    st.rerun()
 
-# === TAB 2: TIEMPO EN VIVO ===
+# === TAB 2 ===
 with tab2:
     if st.session_state.modo_zen and st.session_state.indice_actual is not None:
         tareas = st.session_state.tareas_zen
         idx = st.session_state.indice_actual
-
         if idx < len(tareas):
             tarea = tareas[idx]
             st.header(f"🧘 Tarea {idx + 1} de {len(tareas)}: {tarea}")
-
             if st.session_state.cronometro_inicio is None:
                 if st.button("🎯 Empezar tarea"):
                     st.session_state.cronometro_inicio = datetime.now(tz)
-                    st.rerun()
             else:
-                tiempo_transcurrido = datetime.now(tz) - st.session_state.cronometro_inicio
-                tiempo_str = str(tiempo_transcurrido).split(".")[0]
-                st.info(f"⏱ Tiempo: {tiempo_str}")
+                tiempo_inicio = st.session_state.cronometro_inicio
+                tiempo_ts = int(tiempo_inicio.timestamp())
+                st.markdown("⏱ Tiempo: cargando...")
+
+                st_javascript(
+                    f"""
+                    const start = {tiempo_ts};
+                    setInterval(() => {{
+                        const now = Math.floor(Date.now() / 1000);
+                        const delta = now - start;
+                        const hrs = Math.floor(delta / 3600);
+                        const mins = Math.floor((delta % 3600) / 60);
+                        const secs = delta % 60;
+                        const texto = `⏱ Tiempo: ${'{'}hrs{'}'}h ${'{'}mins{'}'}m ${'{'}secs{'}'}s`;
+                        const el = window.parent.document.querySelectorAll('[data-testid="stMarkdown"]')[0];
+                        if (el) el.innerText = texto;
+                    }}, 1000);
+                    """,
+                    key="live_timer"
+                )
 
                 if st.button("✅ Tarea completada", key=f"done_{idx}"):
                     fin = datetime.now(tz)
@@ -170,10 +180,6 @@ with tab2:
                     })
                     st.session_state.indice_actual += 1
                     st.session_state.cronometro_inicio = None
-                    st.rerun()
-
-                time.sleep(1)
-                st.rerun()
         else:
             st.success("🎉 Modo zen completado. Tiempos registrados.")
             if st.session_state.mongo_id:
@@ -181,12 +187,8 @@ with tab2:
                     {"_id": st.session_state.mongo_id},
                     {"$set": {"tiempos_zen": st.session_state.tiempos_zen}}
                 )
-            else:
-                st.warning("No se encontró ID de sesión para guardar los tiempos.")
-    else:
-        st.info("El modo zen no ha comenzado.")
 
-# === TAB 3: HISTORIAL ===
+# === TAB 3 ===
 with tab3:
     registros = list(col.find().sort("timestamp", -1))
     if registros:
