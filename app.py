@@ -42,6 +42,8 @@ with tab1:
     uploaded_file = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
     if uploaded_file:
         imagen = Image.open(uploaded_file)
+        st.session_state["imagen_cargada"] = imagen  # Guardar imagen
+        st.session_state["nombre_archivo"] = uploaded_file.name
         st.image(imagen, caption="✅ Imagen cargada", use_container_width=True)
 
         if st.button("🔍 Detectar objetos"):
@@ -89,11 +91,11 @@ with tab1:
 
         if not st.session_state.get("modo_zen", False):
             if st.button("🧘 Empezamos a ordenar"):
-                imagen_b64 = convertir_imagen_base64(imagen)
+                imagen_b64 = convertir_imagen_base64(st.session_state["imagen_cargada"])
                 doc = {
                     "timestamp": datetime.now(tz),
                     "objetos": st.session_state.objetos_actuales,
-                    "nombre_archivo": uploaded_file.name,
+                    "nombre_archivo": st.session_state["nombre_archivo"],
                     "imagen_b64": imagen_b64
                 }
                 inserted = col.insert_one(doc)
