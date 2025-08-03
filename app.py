@@ -65,18 +65,18 @@ with tab_migracion:
 
     archivo = st.file_uploader(
         "📷 Toca aquí para tomar una foto (usa la cámara en móvil)",
-        type=["jpg"],
+        type=["jpg", "jpeg", "png"],
         accept_multiple_files=False,
         label_visibility="collapsed",
         key="migracion_uploader"
     )
 
-    if archivo:
+    # Cargar imagen y guardar en Mongo
+    if archivo and "mongo_id_migracion" not in st.session_state:
         imagen = Image.open(archivo)
         st.session_state.imagen_migracion = imagen
         st.session_state.migracion_tiempo_inicio = time.time()
 
-        # Convertir imagen y guardar en Mongo
         imagen_reducida = reducir_imagen(imagen)
         imagen_b64 = convertir_imagen_base64(imagen_reducida)
         doc = {
@@ -86,12 +86,14 @@ with tab_migracion:
         }
         inserted = col.insert_one(doc)
         st.session_state.mongo_id_migracion = inserted.inserted_id
-        st.session_state.objetos_migracion = None
-        st.success("📥 Guardado automático en MongoDB")
         st.rerun()
 
-    # Mostrar botón solo si ya hay imagen cargada
-    if st.session_state.get("imagen_migracion") and not st.session_state.get("objetos_migracion"):
+    # Mostrar imagen si ya fue cargada
+    if st.session_state.get("imagen_migracion"):
+        st.image(st.session_state.imagen_migracion, caption="✅ Foto tomada", use_container_width=True)
+
+    # Botón para análisis si aún no hay objetos
+    if st.session_state.get("imagen_migracion") and "objetos_migracion" not in st.session_state:
         if st.button("🔍 Analizar con GPT-4o"):
             with st.spinner("🔎 Detectando objetos con GPT-4o..."):
                 try:
@@ -108,11 +110,13 @@ with tab_migracion:
                     )
                     contenido = respuesta.choices[0].message.content
                     objetos = [obj.strip("-• ").capitalize() for obj in contenido.split("\n") if obj.strip()]
-                    st.session_state.objetos_migracion = objetos
-
-                    # Medición de tiempo y actualización de Mongo
                     fin = time.time()
                     duracion = round(fin - st.session_state.migracion_tiempo_inicio, 2)
+
+                    st.session_state.objetos_migracion = objetos
+                    st.session_state.migracion_duracion = duracion
+
+                    # Guardar en Mongo
                     col.update_one(
                         {"_id": st.session_state.mongo_id_migracion},
                         {"$set": {
@@ -126,9 +130,9 @@ with tab_migracion:
                 except Exception as e:
                     st.error(f"Error en la detección: {e}")
 
-    # Mostrar resultado limpio si ya están detectados
-    if st.session_state.get("objetos_migracion"):
-        st.success("✅ Objetos detectados:")
+    # Mostrar resultados si ya fueron guardados
+    if "objetos_migracion" in st.session_state:
+        st.success(f"✅ Objetos detectados (tiempo desde carga: {st.session_state.migracion_duracion} segundos):")
         st.json(st.session_state.objetos_migracion)
 
 # === TAB 1: DETECCIÓN ===
