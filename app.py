@@ -6,12 +6,14 @@ import openai
 from pymongo import MongoClient
 from PIL import Image
 from io import BytesIO
+import pandas as pd
 
 # === CONFIGURACIÓN ===
 st.set_page_config(page_title="👁️ Visión GPT-4o – Proyecto 10K", layout="centered")
 st.title("👁️ Visión GPT-4o – Proyecto 10K")
 
-openai.api_key = st.secrets["openai_key"]
+# === CLAVES SEGURAS ===
+openai.api_key = st.secrets["openai_api_key"]
 client = MongoClient(st.secrets["mongo_uri"])
 db = client["proyecto_10k"]
 col = db["objetos_organizados"]
@@ -22,7 +24,7 @@ imagen = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
 if imagen:
     st.image(imagen, caption="Imagen cargada", use_container_width=True)
 
-    # Codificamos para guardar
+    # Codificamos imagen
     bytes_imagen = imagen.read()
     imagen_pil = Image.open(BytesIO(bytes_imagen))
     buffered = BytesIO()
@@ -31,8 +33,8 @@ if imagen:
     st.session_state.imagen_codificada = imagen_codificada
     st.session_state.imagen_nombre = imagen.name
 
-    # === DETECCIÓN IA ===
-    with st.spinner("Analizando con GPT-4o..."):
+    # === DETECCIÓN CON OPENAI GPT-4o ===
+    with st.spinner("Analizando imagen..."):
         prompt = "Enumera brevemente los objetos que aparecen en esta imagen. Solo lista los nombres, separados por comas. No des descripción."
         respuesta = openai.chat.completions.create(
             model="gpt-4o",
@@ -129,18 +131,17 @@ if imagen:
                     del st.session_state[key]
                 st.rerun()
 
-# === HISTORIAL ===
+# === HISTORIAL Y PROGRESO GLOBAL ===
 with st.expander("📜 Historial"):
     docs = list(col.find().sort("fecha", -1))
     if docs:
-        import pandas as pd
         df = pd.DataFrame(docs)
         df["fecha"] = df["fecha"].dt.strftime("%Y-%m-%d %H:%M:%S")
         df = df[["fecha", "objeto", "orden", "lugar_asignado", "tiempo_organizacion_segundos"]]
         df["tiempo_h:m:s"] = df["tiempo_organizacion_segundos"].apply(lambda s: str(timedelta(seconds=s)))
         st.dataframe(df)
 
-        # Progreso acumulado
+        # Progreso acumulado hacia 10.000 horas
         total_segundos = sum(doc.get("tiempo_organizacion_segundos", 0) for doc in docs)
         total_horas = total_segundos / 3600
         porcentaje = min(total_horas / 10000, 1.0)
