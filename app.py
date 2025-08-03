@@ -27,46 +27,44 @@ imagen_subida = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "p
 if imagen_subida:
     st.image(imagen_subida, caption="Imagen cargada", use_container_width=True)
 
-    # Codificar imagen
-    img_bytes = imagen_subida.read()
-    img_b64 = base64.b64encode(img_bytes).decode()
+    # Codificar imagen en base64 con cabecera
+    imagen = Image.open(imagen_subida)
+    buffered = BytesIO()
+    imagen.save(buffered, format="JPEG")
+    img_b64 = base64.b64encode(buffered.getvalue()).decode()
+    data_url = f"data:image/jpeg;base64,{img_b64}"
 
-    # Enviar a OpenAI
+    # Procesamiento con GPT-4o vision
     with st.spinner("🔍 Detectando objetos con GPT-4o..."):
         try:
             respuesta = openai.chat.completions.create(
                 model="gpt-4o",
                 messages=[
                     {
-                        "role": "system",
-                        "content": "Eres un modelo de visión. Devuelve solo una lista de objetos detectados en la imagen, separados por comas. No escribas explicaciones.",
-                    },
-                    {
                         "role": "user",
-                        "content": f"A continuación, una imagen en base64: {img_b64[:500]}... (truncado)",
-                    },
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": data_url}},
+                            {"type": "text", "text": "Devuélveme una lista de los objetos visibles en la imagen, separados por comas. No escribas explicaciones ni introducciones."}
+                        ]
+                    }
                 ],
                 max_tokens=100,
                 temperature=0.2,
             )
+
             contenido = respuesta.choices[0].message.content
             objetos_detectados = [x.strip() for x in contenido.split(",") if x.strip()]
             st.success("✅ Objetos detectados por IA:")
             st.write(objetos_detectados)
 
-            # Mostrar checkboxes y orden
+            # Mostrar checkboxes
             st.markdown("### ✅ Organiza:")
             orden_usuario = []
             for idx, obj in enumerate(objetos_detectados):
                 if st.checkbox(obj, key=obj):
                     orden_usuario.append(obj)
 
-            # Contador simple
-            if "llamadas_api" not in st.session_state:
-                st.session_state["llamadas_api"] = 0
-            st.session_state["llamadas_api"] += 1
-
-            # Cronómetro y registro si ordenó algo
+            # Cronómetro y control
             if orden_usuario:
                 if st.button("🕐 Iniciar sesión de orden"):
                     start_time = datetime.utcnow()
@@ -83,13 +81,12 @@ if imagen_subida:
                 "timestamp": datetime.utcnow(),
                 "objetos_detectados": objetos_detectados,
                 "orden_usuario": orden_usuario,
-                "llamada_nro": st.session_state["llamadas_api"],
+                "tokens_usados": 100
             }
             col_registros.insert_one(doc)
-
             col_uso.insert_one({
                 "fecha": datetime.utcnow(),
-                "api_key_usada": openai.api_key[-6:],  # Final para referencia
+                "api_key_usada": openai.api_key[-6:],
                 "tokens_estimados": 100
             })
 
