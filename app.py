@@ -60,18 +60,20 @@ if uploaded_file:
                     st.success("✅ Objetos detectados:")
                     st.write(objetos)
 
-                    # ✅ CHECKBOXES INTERACTIVOS (SIN LÓGICA FUNCIONAL)
+                    # ✅ CHECKBOXES INTERACTIVOS
                     st.markdown("**🖱️ Marca los elementos libremente:**")
                     for i, obj in enumerate(objetos):
                         st.checkbox(label=obj, key=f"chk_{i}", value=False)
 
-                    # REGISTRO EN MONGO
-                    doc = {
-                        "timestamp": datetime.now(tz),
-                        "objetos": objetos,
-                        "nombre_archivo": uploaded_file.name
-                    }
-                    col.insert_one(doc)
+                    # ✅ BOTÓN PARA GUARDAR SESIÓN
+                    if st.button("💾 Guardar sesión"):
+                        doc = {
+                            "timestamp": datetime.now(tz),
+                            "objetos": objetos,
+                            "nombre_archivo": uploaded_file.name
+                        }
+                        col.insert_one(doc)
+                        st.success("✅ Sesión guardada en la base de datos.")
 
                 else:
                     st.warning("⚠️ No se detectaron objetos en la imagen.")
