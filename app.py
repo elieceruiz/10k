@@ -201,6 +201,14 @@ with tab3:
                 if "tiempos_zen" in reg:
                     st.markdown("⏱️ **Modo zen:**")
                     for i, t in enumerate(reg["tiempos_zen"], 1):
-                        st.write(f"{i}. {t['nombre']} – {round(t['duracion_segundos'])}s")
+                        inicio = datetime.fromisoformat(t['tiempo_inicio']).astimezone(tz).strftime("%H:%M:%S")
+                        fin = datetime.fromisoformat(t['tiempo_fin']).astimezone(tz).strftime("%H:%M:%S")
+                        duracion = round(t['duracion_segundos'])
+                        st.markdown(f"""
+**{i}. {t['nombre']}**
+- 🟢 Inicio: `{inicio}`
+- 🔴 Fin: `{fin}`
+- ⏱️ Duración: `{duracion} segundos`
+                        """)
     else:
         st.info("No hay sesiones completas registradas aún.")
