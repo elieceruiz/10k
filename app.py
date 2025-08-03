@@ -56,9 +56,10 @@ if imagen:
             contenido = respuesta.choices[0].message.content
             objetos_detectados = [x.strip() for x in contenido.split(",") if x.strip()]
             fuente = "OpenAI GPT-4o"
-        except openai.OpenAIError:
-            # === BACKUP: Hugging Face ===
+        except openai.OpenAIError as e:
             st.warning("⚠️ GPT-4o no disponible. Usando motor alterno gratuito (Hugging Face)...")
+
+            # === Fallback Hugging Face robusto ===
             api_url = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
             headers = {"Accept": "application/json"}
             response = requests.post(
@@ -66,14 +67,27 @@ if imagen:
                 headers=headers,
                 files={"image": buffered.getvalue()}
             )
-            try:
-                data = response.json()
-                if isinstance(data, list) and "generated_text" in data[0]:
-                    texto = data[0]["generated_text"]
-                    objetos_detectados = [x.strip().lower() for x in texto.replace(".", "").split() if len(x) > 3]
-                    fuente = "Hugging Face (backup)"
-            except:
-                st.error("❌ No fue posible detectar objetos con ningún modelo.")
+
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    st.caption(f"🔧 Respuesta HF: {data}")
+
+                    if isinstance(data, list) and "generated_text" in data[0]:
+                        texto = data[0]["generated_text"]
+                        st.caption(f"✏️ Descripción detectada: {texto}")
+                        objetos_detectados = [
+                            x.strip().lower()
+                            for x in texto.replace(".", "").replace(",", "").split()
+                            if len(x) > 3
+                        ]
+                        fuente = "Hugging Face (backup)"
+                    else:
+                        st.error("❌ El modelo de Hugging Face no devolvió resultados válidos.")
+                except Exception as e:
+                    st.error(f"❌ Error al procesar respuesta de Hugging Face: {e}")
+            else:
+                st.error(f"❌ Error HTTP desde Hugging Face: código {response.status_code}")
 
     if objetos_detectados:
         st.markdown(f"### 🔎 Objetos detectados por IA ({fuente}):")
@@ -85,7 +99,6 @@ if imagen:
                 orden = st.number_input(f"Orden para '{obj}':", min_value=1, step=1, key=f"orden_{idx}")
                 seleccionados[obj] = {"orden": orden}
 
-        # === FLUJO DE ORGANIZACIÓN ===
         if seleccionados:
             st.divider()
             st.subheader("🛠️ Organización guiada")
