@@ -1,120 +1,105 @@
 import streamlit as st
-from pymongo import MongoClient
 from PIL import Image
+from io import BytesIO
+import base64
 import openai
-import io
+from pymongo import MongoClient
 from datetime import datetime
-import time
 import pytz
+import time
 
-# === CONFIGURACIÓN INICIAL ===
-st.set_page_config(page_title="👁️ Visión GPT-4o – Proyecto 10K", layout="centered")
-st.title("👁️ Visión GPT-4o – Proyecto 10K")
+# --- CONFIGURACIÓN GENERAL ---
+st.set_page_config(page_title="👁️ Visión GPT – Proyecto 10K", layout="wide")
+st.title("👁️ Visión GPT – Proyecto 10K")
 
-# === SECRETS Y ZONA HORARIA ===
+# --- SECRETS Y CONEXIONES ---
+openai.api_key = st.secrets["openai_api_key"]
 MONGO_URI = st.secrets["mongo_uri"]
 client = MongoClient(MONGO_URI)
 db = client["proyecto_10k"]
 col = db["registro_sesiones"]
-
-openai.api_key = st.secrets["openai_api_key"]
 tz = pytz.timezone("America/Bogota")
 
-# === VARIABLES DE SESIÓN ===
-if "objetos" not in st.session_state:
-    st.session_state.objetos = []
-if "iniciar_tiempo" not in st.session_state:
-    st.session_state.iniciar_tiempo = False
-if "inicio_objeto" not in st.session_state:
-    st.session_state.inicio_objeto = None
-if "objetos_finalizados" not in st.session_state:
-    st.session_state.objetos_finalizados = []
-if "registro" not in st.session_state:
-    st.session_state.registro = []
+# --- FUNCIONES ---
+def image_to_base64(img: Image.Image) -> str:
+    buffered = BytesIO()
+    img.save(buffered, format="JPEG")
+    return base64.b64encode(buffered.getvalue()).decode()
 
-# === SUBIR IMAGEN ===
-imagen = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
-if imagen:
-    st.image(imagen, caption="Imagen cargada", use_container_width=True)
-
-    if st.button("🧠 Detectar objetos"):
-        try:
-            image = Image.open(imagen).convert("RGB")
-            buf = io.BytesIO()
-            image.save(buf, format='PNG')
-            byte_im = buf.getvalue()
-
-            prompt = "Describe brevemente los objetos visibles en esta imagen en formato lista simple, sin detalles ni contexto, solo nombres de objetos."
-            base64_image = f"data:image/png;base64,{imagen.getvalue().hex()[:50]}"  # Dummy just to show size
-
-            response = openai.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": "Eres un asistente de visión artificial que identifica objetos."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=200,
-                temperature=0.2
-            )
-            texto = response.choices[0].message.content
-            objetos_detectados = [line.strip("-• ").strip() for line in texto.splitlines() if line.strip()]
-            st.session_state.objetos = objetos_detectados
-            st.session_state.objetos_finalizados = []
-            st.session_state.registro = []
-            st.success("✅ Objetos detectados por IA.")
-
-        except Exception as e:
-            st.error(f"Error en la detección: {e}")
-
-# === MOSTRAR OBJETOS DETECTADOS CON CHECKS ===
-if st.session_state.objetos:
-    st.subheader("📦 Objetos detectados:")
-    for obj in st.session_state.objetos:
-        if obj not in st.session_state.objetos_finalizados:
-            if st.button(f"✅ Iniciar con: {obj}"):
-                st.session_state.inicio_objeto = (obj, time.time())
-                st.session_state.iniciar_tiempo = True
-
-# === CRONÓMETRO OBJETO ===
-if st.session_state.iniciar_tiempo and st.session_state.inicio_objeto:
-    obj, inicio = st.session_state.inicio_objeto
-    st.markdown(f"⏳ **Ordenando:** `{obj}`")
-
-    elapsed = int(time.time() - inicio)
-    st.markdown(f"🧭 Tiempo transcurrido: **{elapsed} segundos**")
-
-    if elapsed >= 120:  # 2 minutos por objeto
-        st.success(f"✅ Objeto `{obj}` ordenado en {elapsed} segundos.")
-        st.session_state.objetos_finalizados.append(obj)
-        st.session_state.registro.append({"objeto": obj, "duracion": elapsed})
-
-        st.session_state.iniciar_tiempo = False
-        st.session_state.inicio_objeto = None
-
-        # Guardar en MongoDB
-        doc = {
-            "timestamp": datetime.now(tz),
-            "objetos": [obj],
-            "duracion_segundos": elapsed
-        }
-        try:
-            col.insert_one(doc)
-        except Exception as err:
-            st.warning(f"No se pudo guardar en MongoDB: {err}")
-
-        st.rerun()
-
-# === HISTORIAL DE SESIONES ===
-with st.expander("📚 Historial de sesiones"):
+def detectar_objetos(imagen: Image.Image) -> list:
     try:
-        registros = list(col.find().sort("timestamp", -1))
+        b64 = image_to_base64(imagen)
+        prompt = "Enumera brevemente los objetos visibles en esta imagen como una lista en JSON, sin explicación."
+        respuesta = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "Eres un asistente que detecta objetos visuales."},
+                {"role": "user", "content": prompt},
+                {"role": "user", "content": f"La imagen codificada es: {b64[:500]}..."}
+            ],
+            max_tokens=200,
+            temperature=0.3
+        )
+        texto = respuesta.choices[0].message.content
+        objetos = eval(texto)
+        return objetos if isinstance(objetos, list) else []
+    except Exception as e:
+        st.error(f"Error en la detección: {e}")
+        return []
+
+# --- INTERFAZ ---
+img = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
+
+if img:
+    imagen = Image.open(img)
+    st.image(imagen, caption="Imagen cargada", use_container_width=True)
+    st.markdown("✅ Imagen cargada")
+
+    if st.button("🔎 Detectar objetos"):
+        objetos_detectados = detectar_objetos(imagen)
+
+        if objetos_detectados:
+            st.success("📦 Objetos detectados por IA")
+            seleccionados = []
+            for i, obj in enumerate(objetos_detectados, 1):
+                if st.checkbox(f"{i}. {obj}"):
+                    seleccionados.append(obj)
+
+            if seleccionados:
+                if st.button("🟢 Iniciar ordenamiento"):
+                    inicio = datetime.now(tz)
+                    marcador = st.empty()
+                    segundos = 0
+
+                    while True:
+                        ahora = datetime.now(tz)
+                        transcurrido = int((ahora - inicio).total_seconds())
+                        marcador.markdown(f"🕒 Tiempo transcurrido: {transcurrido} segundos")
+                        time.sleep(1)
+                        segundos = transcurrido
+                        st.session_state["tiempo"] = segundos
+                        if segundos > 2:  # To break loop for testing
+                            break
+
+                    # --- Guardar en MongoDB ---
+                    doc = {
+                        "timestamp": datetime.now(tz),
+                        "objetos": seleccionados,
+                        "duracion_segundos": segundos
+                    }
+                    col.insert_one(doc)
+                    st.success("📝 Sesión registrada exitosamente.")
+        else:
+            st.warning("❌ No se detectaron objetos.")
+
+# --- HISTORIAL ---
+with st.expander("📚 Historial de sesiones"):
+    registros = list(col.find().sort("timestamp", -1).limit(10))
+    if registros:
         for reg in registros:
-            try:
-                fecha = reg["timestamp"].astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
-            except KeyError:
-                fecha = "Fecha no disponible"
-            objetos = ", ".join(reg.get("objetos", []))
+            fecha = reg.get("timestamp", datetime.now()).astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
+            objs = ", ".join(reg.get("objetos", []))
             dur = reg.get("duracion_segundos", 0)
-            st.markdown(f"- **{fecha}** → ⏱ {dur} seg | 📦 {objetos}")
-    except Exception as err:
-        st.error(f"Error al acceder al historial: {err}")
+            st.markdown(f"• `{fecha}` — ⏱ {dur} seg — 🧩 {objs}")
+    else:
+        st.info("Sin registros aún.")
