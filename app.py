@@ -1,54 +1,89 @@
 import streamlit as st
-from openai import OpenAI
 from pymongo import MongoClient
 from datetime import datetime
+from PIL import Image
+import base64
+from io import BytesIO
+import openai
 import pytz
+import time
 
-# Configuración inicial
-st.set_page_config(page_title="📸 Visión GPT-4o", layout="wide")
+# === CONFIGURACIÓN DE LA APP ===
+st.set_page_config(page_title="Visión GPT-4o – Proyecto 10K", layout="wide")
 st.title("👁️ Visión GPT-4o – Proyecto 10K")
 
-# Mongo y zona horaria
-client = MongoClient(st.secrets["mongo_uri"])
+# === CARGA DE SECRETOS ===
+MONGO_URI = st.secrets["mongo_uri"]
+OPENAI_API_KEY = st.secrets["openai_api_key"]
+
+# === CONFIGURACIÓN DE CONEXIONES ===
+client = MongoClient(MONGO_URI)
 db = client["proyecto_10k"]
 col = db["registro_sesiones"]
+
+openai.api_key = OPENAI_API_KEY
 tz = pytz.timezone("America/Bogota")
 
-# API Key OpenAI
-openai_api_key = st.secrets["openai_api_key"]
-client_ai = OpenAI(api_key=openai_api_key)
+# === FUNCIÓN PARA CONVERTIR IMAGEN A BASE64 ===
+def convertir_imagen_base64(imagen):
+    buffer = BytesIO()
+    imagen.save(buffer, format="JPEG")
+    img_b64 = base64.b64encode(buffer.getvalue()).decode()
+    return f"data:image/jpeg;base64,{img_b64}"
 
-# Subida de imagen
+# === SUBIDA DE IMAGEN ===
 uploaded_file = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
 if uploaded_file:
-    st.image(uploaded_file, caption="Imagen cargada", use_container_width=True)
+    imagen = Image.open(uploaded_file)
+    st.image(imagen, caption="✅ Imagen cargada", use_container_width=True)
 
     if st.button("🔍 Detectar objetos"):
-        with st.spinner("Analizando con GPT-4o..."):
+        with st.spinner("Analizando imagen con GPT-4o..."):
             try:
-                # Enviar imagen directamente como archivo (recomendado para GPT-4o)
-                response = client_ai.chat.completions.create(
+                b64_img = convertir_imagen_base64(imagen)
+                respuesta = openai.chat.completions.create(
                     model="gpt-4o",
                     messages=[
-                        {"role": "system", "content": "Eres un modelo experto en visión por computadora."},
-                        {"role": "user", "content": "Describe brevemente los objetos visibles en esta imagen."}
+                        {"role": "user", "content": [
+                            {"type": "text", "text": "Detecta solo objetos u elementos visibles. Devuelve una lista clara y concisa de los objetos sin descripciones largas ni contexto adicional."},
+                            {"type": "image_url", "image_url": {"url": b64_img}}
+                        ]}
                     ],
-                    files=[{"file": uploaded_file}],
-                    max_tokens=500
+                    max_tokens=300,
                 )
-                resultado = response.choices[0].message.content
 
-                st.success("✅ Objetos detectados por IA.")
-                st.write("📦 Objetos detectados:")
-                st.markdown(f"- {resultado}")
+                # EXTRAER OBJETOS
+                contenido = respuesta.choices[0].message.content
+                objetos = [obj.strip("-• ") for obj in contenido.split("\n") if obj.strip()]
 
-                # Guardar en MongoDB
-                doc = {
-                    "timestamp": datetime.now(tz),
-                    "descripcion": resultado,
-                    "filename": uploaded_file.name
-                }
-                col.insert_one(doc)
+                if objetos:
+                    st.success("✅ Objetos detectados:")
+                    st.write(objetos)
+
+                    # REGISTRO EN MONGO
+                    doc = {
+                        "timestamp": datetime.now(tz),
+                        "objetos": objetos,
+                        "nombre_archivo": uploaded_file.name
+                    }
+                    col.insert_one(doc)
+
+                else:
+                    st.warning("⚠️ No se detectaron objetos en la imagen.")
 
             except Exception as e:
                 st.error(f"Error en la detección: {e}")
+
+# === HISTORIAL DE SESIONES ===
+st.subheader("📚 Historial de sesiones")
+registros = list(col.find().sort("timestamp", -1))
+if registros:
+    for reg in registros:
+        fecha = reg.get("timestamp", datetime.now()).astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
+        st.markdown(f"**🕓 {fecha}**")
+        st.write("📦 Objetos detectados:")
+        for i, obj in enumerate(reg.get("objetos", []), 1):
+            st.write(f"- {obj}")
+        st.markdown("---")
+else:
+    st.info("No hay sesiones completas registradas aún.")
