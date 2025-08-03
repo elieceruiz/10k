@@ -64,6 +64,8 @@ col_migracion = db["registro_migracion"]
 
 if "inicio_captura_migracion" not in st.session_state:
     st.session_state.inicio_captura_migracion = datetime.now(tz)
+if "objetos_migracion" not in st.session_state:
+    st.session_state.objetos_migracion = []
 
 with tab_migracion:
     st.subheader("🧪 Captura directa (fluida y mínima)")
@@ -91,11 +93,42 @@ with tab_migracion:
             "imagen_b64": imagen_b64
         }
         col_migracion.insert_one(doc)
-
         st.success("📥 Guardado automático en MongoDB")
-        st.button("🔍 Analizar con GPT-4o")  # aún sin lógica
 
-        # Reiniciar temporizador para siguiente captura
+        if not st.session_state.objetos_migracion:
+            if st.button("🔍 Analizar con GPT-4o"):
+                with st.spinner("Analizando con GPT-4o..."):
+                    try:
+                        b64_img = "data:image/jpeg;base64," + imagen_b64
+                        respuesta = openai.chat.completions.create(
+                            model="gpt-4o",
+                            messages=[
+                                {"role": "user", "content": [
+                                    {
+                                        "type": "text",
+                                        "text": "Detecta solo objetos visibles. Devuelve una lista breve, sin descripciones largas ni contexto adicional ni explicaciones. Solo los objetos."
+                                    },
+                                    {"type": "image_url", "image_url": {"url": b64_img}}
+                                ]}
+                            ],
+                            max_tokens=200,
+                            temperature=0.3
+                        )
+                        objetos_raw = respuesta.choices[0].message.content
+                        objetos = [obj.strip("-• ").capitalize() for obj in objetos_raw.split("\n") if obj.strip()]
+                        if objetos:
+                            st.session_state.objetos_migracion = objetos
+                            st.success("✅ Objetos detectados:")
+                            st.write(objetos)
+                        else:
+                            st.warning("⚠️ No se detectaron objetos.")
+                    except Exception as e:
+                        st.error(f"Error durante la detección: {e}")
+        else:
+            st.success("✅ Objetos ya detectados:")
+            st.write(st.session_state.objetos_migracion)
+
+        # Reiniciar tiempo de captura para una futura foto
         st.session_state.inicio_captura_migracion = datetime.now(tz)
 
 # === TAB 1: DETECCIÓN ===
