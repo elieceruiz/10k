@@ -65,7 +65,7 @@ tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección",
 with tab_migracion:
     st.subheader("🧪 Captura desde cámara (modo directo)")
 
-    # Clase que transforma y guarda el último frame como imagen
+    # Procesador de video para capturar el último frame
     class CameraProcessor(VideoTransformerBase):
         def __init__(self):
             self.last_frame = None
@@ -74,23 +74,23 @@ with tab_migracion:
             self.last_frame = frame.to_image()
             return frame
 
-    # Componente de cámara en vivo
+    # Componente de cámara activa
     ctx = webrtc_streamer(
         key="camera",
-        mode="SENDRECV",
+        mode=WebRtcMode.SENDRECV,  # ← CORREGIDO aquí
         desired_playing_state=True,
         video_transformer_factory=CameraProcessor,
         media_stream_constraints={"video": True, "audio": False},
     )
 
-    # Mostrar botón solo si hay frame disponible
+    # Si hay imagen disponible, permitir captura
     if ctx.video_transformer and ctx.video_transformer.last_frame is not None:
         if st.button("📸 Tomar foto"):
             imagen = ctx.video_transformer.last_frame
             st.image(imagen, caption="✅ Foto tomada", use_container_width=True)
-            st.session_state.imagen_migracion = imagen  # Guardamos en el estado para luego analizar
+            st.session_state.imagen_migracion = imagen  # guardada para análisis futuro
 
-            st.button("🔍 Analizar con GPT-4o")  # Botón aún sin lógica activa
+            st.button("🔍 Analizar con GPT-4o")  # aún sin función
 
 # === TAB 1: DETECCIÓN ===
 with tab1:
