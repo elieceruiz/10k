@@ -1,105 +1,106 @@
 import streamlit as st
+import openai
+import requests
+import time
 from datetime import datetime
 from pymongo import MongoClient
-import openai
-import base64
 from PIL import Image
-from io import BytesIO
-import time
+import io
 
-# === CONFIGURACIÓN ===
-st.set_page_config(page_title="👁️ Visión GPT-4o – Proyecto 10K", layout="wide")
-st.title("👁️ Visión GPT-4o – Proyecto 10K")
-st.markdown("📎 [Ver uso actual en OpenAI](https://platform.openai.com/usage)")
+# === CONFIGURACIÓN INICIAL ===
+st.set_page_config(page_title="👁️ Visión GPT – Proyecto 10K", layout="centered")
+st.title("👁️ Visión GPT – Proyecto 10K")
 
-# === SECRETS ===
+# === SECRETS Y CLIENTES ===
 openai.api_key = st.secrets["openai_api_key"]
-MONGO_URI = st.secrets["mongo_uri"]
-
-# === CONEXIÓN A MONGO ===
-client = MongoClient(MONGO_URI)
+client = MongoClient(st.secrets["mongo_uri"])
 db = client["proyecto_10k"]
-col_registros = db["registros"]
-col_uso = db["uso_api"]
+col = db["sesiones_ordenamiento"]
 
-# === SUBIR IMAGEN ===
-imagen_subida = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
-if imagen_subida:
-    st.image(imagen_subida, caption="Imagen cargada", use_container_width=True)
+# === FUNCIONES ===
+def detectar_objetos_desde_imagen(img_bytes):
+    base64_image = img_bytes.encode("base64") if isinstance(img_bytes, bytes) else img_bytes
+    prompt = "Devuélveme solo los nombres de los objetos que ves en esta imagen en formato lista. Ejemplo: ['objeto 1', 'objeto 2', ...]. No expliques nada."
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "Eres un asistente experto en visión por computadora."},
+                {"role": "user", "content": f"{prompt}\nImagen (base64): {base64_image[:4000]}"}
+            ],
+            max_tokens=150,
+        )
+        contenido = response.choices[0].message.content
+        lista = eval(contenido.strip())
+        if isinstance(lista, list):
+            return lista
+        return []
+    except Exception as e:
+        st.warning("❌ No se pudo detectar objetos con OpenAI.")
+        return []
 
-    # Codificar imagen en base64 con cabecera
-    imagen = Image.open(imagen_subida)
-    buffered = BytesIO()
-    imagen.save(buffered, format="JPEG")
-    img_b64 = base64.b64encode(buffered.getvalue()).decode()
-    data_url = f"data:image/jpeg;base64,{img_b64}"
+def obtener_total_tiempo():
+    sesiones = list(col.find({}))
+    return sum(s.get("duracion_segundos", 0) for s in sesiones)
 
-    # === DETECTAR SOLO UNA VEZ ===
+def convertir_formato(segundos):
+    horas, resto = divmod(segundos, 3600)
+    minutos, segundos = divmod(resto, 60)
+    return f"{horas}h {minutos}m {segundos}s"
+
+# === SUBIDA DE IMAGEN ===
+imagen_cargada = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"])
+if imagen_cargada:
+    img_bytes = imagen_cargada.read()
+    st.image(img_bytes, caption="Imagen cargada", use_container_width=True)
+
     if "objetos_detectados" not in st.session_state:
-        with st.spinner("🔍 Detectando objetos con GPT-4o..."):
-            try:
-                respuesta = openai.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "image_url", "image_url": {"url": data_url}},
-                                {"type": "text", "text": "Devuélveme una lista de los objetos visibles en la imagen, separados por comas. No escribas explicaciones ni introducciones."}
-                            ]
-                        }
-                    ],
-                    max_tokens=100,
-                    temperature=0.2,
-                )
+        with st.spinner("Detectando objetos en la imagen..."):
+            objetos = detectar_objetos_desde_imagen(img_bytes)
+            st.session_state.objetos_detectados = objetos
+            st.session_state.orden_activa = None
+            st.session_state.inicio = None
 
-                contenido = respuesta.choices[0].message.content
-                objetos = [x.strip() for x in contenido.split(",") if x.strip()]
-                st.session_state.objetos_detectados = objetos
+# === MOSTRAR OBJETOS DETECTADOS ===
+if "objetos_detectados" in st.session_state and st.session_state.objetos_detectados:
+    st.subheader("🎯 Objetos detectados:")
+    for idx, objeto in enumerate(st.session_state.objetos_detectados):
+        col1, col2 = st.columns([6, 2])
+        with col1:
+            st.markdown(f"- {objeto}")
+        with col2:
+            if st.session_state.orden_activa is None:
+                if st.button(f"🕒 Iniciar", key=f"iniciar_{idx}"):
+                    st.session_state.orden_activa = objeto
+                    st.session_state.inicio = time.time()
+            elif st.session_state.orden_activa == objeto:
+                if st.button("✅ Finalizar", key=f"finalizar_{idx}"):
+                    fin = time.time()
+                    duracion = int(fin - st.session_state.inicio)
+                    col.insert_one({
+                        "objeto": objeto,
+                        "inicio": datetime.fromtimestamp(st.session_state.inicio),
+                        "fin": datetime.fromtimestamp(fin),
+                        "duracion_segundos": duracion
+                    })
+                    st.success(f"✔️ Se registraron {duracion} segundos para '{objeto}'")
+                    st.session_state.orden_activa = None
+                    st.session_state.inicio = None
+                    st.rerun()
 
-                # Guardar en Mongo
-                col_registros.insert_one({
-                    "timestamp": datetime.utcnow(),
-                    "objetos_detectados": objetos,
-                    "tokens_usados": 100
-                })
-                col_uso.insert_one({
-                    "fecha": datetime.utcnow(),
-                    "api_key_usada": openai.api_key[-6:],
-                    "tokens_estimados": 100
-                })
+# === CRONÓMETRO ACTIVO ===
+if st.session_state.get("orden_activa") and st.session_state.get("inicio"):
+    tiempo_actual = int(time.time() - st.session_state.inicio)
+    st.info(f"⏳ Tiempo activo sobre '{st.session_state.orden_activa}': {convertir_formato(tiempo_actual)}")
+    time.sleep(1)
+    st.experimental_rerun()
 
-            except openai.RateLimitError:
-                st.error("🚫 Has superado el límite de uso de la API de OpenAI.")
-            except openai.AuthenticationError:
-                st.error("❌ API Key inválida o no autorizada.")
-            except Exception as e:
-                st.error(f"⚠️ Error inesperado: {e}")
+# === TIEMPO ACUMULADO GLOBAL ===
+total_segundos = obtener_total_tiempo()
+st.subheader("📈 Tiempo acumulado hacia las 10.000 horas:")
+st.success(f"🧮 Total: {convertir_formato(total_segundos)}")
+progreso = total_segundos / 36000000  # 10,000 horas en segundos
+st.progress(min(progreso, 1.0))
 
-# === MOSTRAR RESULTADOS ===
-if "objetos_detectados" in st.session_state:
-    objetos_detectados = st.session_state.objetos_detectados
-    st.success("✅ Objetos detectados por IA:")
-    st.write(objetos_detectados)
-
-    st.markdown("### ✅ Organiza:")
-
-    orden_usuario = []
-    for idx, obj in enumerate(objetos_detectados):
-        if st.checkbox(obj, key=f"check_{idx}"):
-            orden_usuario.append(obj)
-
-    if orden_usuario and st.button("🕐 Iniciar sesión de orden"):
-        st.session_state["tiempo_inicio"] = time.time()
-        st.session_state["orden_usuario"] = orden_usuario
-        st.success("⏱️ Cronómetro iniciado...")
-
-    if "tiempo_inicio" in st.session_state:
-        tiempo_actual = time.time()
-        duracion = int(tiempo_actual - st.session_state["tiempo_inicio"])
-        minutos, segundos = divmod(duracion, 60)
-        st.info(f"🧭 Tiempo transcurrido: {minutos:02d}:{segundos:02d}")
-
-        st.markdown("### 📦 Elementos seleccionados:")
-        for i, item in enumerate(st.session_state["orden_usuario"], 1):
-            st.markdown(f"- {i}. {item}")
+# === ENLACE AL USO DE OPENAI ===
+st.markdown("[🔗 Ver uso de créditos OpenAI](https://platform.openai.com/usage)")
