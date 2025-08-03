@@ -62,7 +62,23 @@ tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección",
 # === TAB MIGRACIÓN ===
 with tab_migracion:
     st.subheader("🧪 Área de pruebas para migraciones")
-    st.info("Aquí puedes desarrollar y probar nuevas funcionalidades antes de integrarlas a las demás pestañas.")
+
+    st.markdown("[📷 Tomar foto con la cámara](#)", unsafe_allow_html=True)
+
+    archivo = st.file_uploader(
+        "Toca aquí para tomar la foto (preferiblemente desde el móvil)",
+        type=["jpg"],
+        accept_multiple_files=False,
+        key="migracion_camara",
+        label_visibility="collapsed"
+    )
+
+    if archivo:
+        imagen = Image.open(archivo)
+        st.image(imagen, caption="✅ Imagen tomada", use_container_width=True)
+        st.session_state.imagen_migracion = imagen  # por si se usa luego
+
+        st.button("🔍 Analizar con GPT-4o")  # aún sin función
 
 # === TAB 1: DETECCIÓN ===
 with tab1:
