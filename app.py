@@ -156,24 +156,28 @@ with tab2:
                     st.session_state.cronometro_inicio = datetime.now(tz)
                     st.rerun()
             else:
-                tiempo_transcurrido = datetime.now(tz) - st.session_state.cronometro_inicio
-                tiempo_str = str(tiempo_transcurrido).split(".")[0]
-                st.info(f"⏱ Tiempo: {tiempo_str}")
+                cronometro_placeholder = st.empty()
+                stop_button = st.button("✅ Tarea completada", key=f"done_{idx}")
 
-                if st.button("✅ Tarea completada", key=f"done_{idx}"):
-                    fin = datetime.now(tz)
-                    st.session_state.tiempos_zen.append({
-                        "nombre": tarea,
-                        "tiempo_inicio": st.session_state.cronometro_inicio.isoformat(),
-                        "tiempo_fin": fin.isoformat(),
-                        "duracion_segundos": (fin - st.session_state.cronometro_inicio).total_seconds()
-                    })
-                    st.session_state.indice_actual += 1
-                    st.session_state.cronometro_inicio = None
-                    st.rerun()
+                while True:
+                    ahora = datetime.now(tz)
+                    tiempo_transcurrido = ahora - st.session_state.cronometro_inicio
+                    tiempo_str = str(tiempo_transcurrido).split(".")[0]
+                    cronometro_placeholder.info(f"⏱ Tiempo: {tiempo_str}")
+                    time.sleep(1)
 
-                time.sleep(1)
-                st.rerun()
+                    if stop_button:
+                        fin = datetime.now(tz)
+                        st.session_state.tiempos_zen.append({
+                            "nombre": tarea,
+                            "tiempo_inicio": st.session_state.cronometro_inicio.isoformat(),
+                            "tiempo_fin": fin.isoformat(),
+                            "duracion_segundos": (fin - st.session_state.cronometro_inicio).total_seconds()
+                        })
+                        st.session_state.indice_actual += 1
+                        st.session_state.cronometro_inicio = None
+                        st.rerun()
+                        break
         else:
             st.success("🎉 Modo zen completado. Tiempos registrados.")
             if st.session_state.mongo_id:
