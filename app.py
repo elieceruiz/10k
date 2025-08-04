@@ -59,81 +59,44 @@ st.progress(progreso)
 # === PESTAÑAS ===
 tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección", "⏱️ Tiempo en vivo", "📚 Historial"])
 
-# === TAB MIGRACIÓN ===
-with tab_migracion:
-    st.subheader("🧪 Captura con cámara (fluida y ligera)")
+# === TAB 3: HISTORIAL ===
+with tab3:
+    registros = list(col.find().sort("timestamp", -1))
+    if registros:
+        for reg in registros:
+            fecha = reg.get("timestamp", datetime.now()).astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
+            with st.expander(f"🕓 {fecha}", expanded=False):
+                if "imagen_b64" in reg:
+                    st.image(Image.open(BytesIO(base64.b64decode(reg["imagen_b64"]))), width=300, caption="📸 Imagen registrada")
 
-    if "inicio_migracion" not in st.session_state:
-        st.session_state.inicio_migracion = None
+                st.write("📦 Objetos detectados:")
+                for i, obj in enumerate(reg.get("objetos", []), 1):
+                    st.write(f"- {obj}")
 
-    archivo = st.file_uploader(
-        label="📷 Toca para tomar foto (usa cámara móvil)",
-        type=["jpg", "jpeg", "png"],
-        label_visibility="collapsed",
-        key="migracion_uploader_fluido"
-    )
+                # Mostrar métricas si existen
+                if "tiempo_total_segundos" in reg or "tiempo_analisis_segundos" in reg or "tiempo_carga_segundos" in reg:
+                    st.markdown("### ⏱️ Tiempos:")
+                    if "tiempo_carga_segundos" in reg:
+                        st.markdown(f"- 🕒 Carga: `{reg['tiempo_carga_segundos']} segundos`")
+                    if "tiempo_analisis_segundos" in reg:
+                        st.markdown(f"- 🧠 Análisis GPT-4o: `{reg['tiempo_analisis_segundos']} segundos`")
+                    if "tiempo_total_segundos" in reg:
+                        st.markdown(f"- 📥 Tiempo total desde carga: `{reg['tiempo_total_segundos']} segundos`")
 
-    if archivo:
-        if st.session_state.inicio_migracion is None:
-            st.session_state.inicio_migracion = time.time()
-
-        imagen = Image.open(archivo)
-        imagen_reducida = reducir_imagen(imagen)
-        imagen_b64 = convertir_imagen_base64(imagen_reducida)
-
-        tiempo_carga = round(time.time() - st.session_state.inicio_migracion, 2)
-        st.image(imagen, caption="✅ Foto tomada", use_container_width=True)
-        st.info(f"🕒 Tiempo desde carga de imagen: {tiempo_carga} segundos")
-
-        if st.button("🔍 Analizar con GPT-4o"):
-            with st.spinner("🔎 Analizando imagen con GPT-4o..."):
-                inicio_analisis = time.time()
-                try:
-                    b64_img = "data:image/jpeg;base64," + imagen_b64
-                    respuesta = openai.chat.completions.create(
-                        model="gpt-4o",
-                        messages=[
-                            {"role": "user", "content": [
-                                {"type": "text", "text": "Detecta solo objetos visibles. Devuelve una lista clara tipo JSON, sin contexto extra y con mayúscula inicial."},
-                                {"type": "image_url", "image_url": {"url": b64_img}}
-                            ]}
-                        ],
-                        max_tokens=300
-                    )
-                    fin_analisis = time.time()
-
-                    tiempo_analisis = round(fin_analisis - inicio_analisis, 2)
-
-                    try:
-                        objetos = eval(respuesta.choices[0].message.content)
-                        if not isinstance(objetos, list):
-                            raise ValueError
-                    except:
-                        st.error("❌ Respuesta inesperada de GPT-4o. Se esperaba una lista JSON.")
-                        objetos = []
-
-                    st.success(f"🧠 Análisis GPT-4o: {tiempo_analisis} segundos")
-                    st.json(objetos)
-
-                    st.markdown("### 📋 Lista de objetos detectados:")
-                    for obj in objetos:
-                        st.checkbox(obj, value=False, disabled=True)
-
-                    # Guardar en Mongo
-                    doc = {
-                        "timestamp": datetime.now(tz),
-                        "objetos": objetos,
-                        "imagen_b64": imagen_b64,
-                        "tiempo_carga_foto": tiempo_carga,
-                        "tiempo_analisis_api": tiempo_analisis,
-                        "fuente": "migracion"
-                    }
-                    col.insert_one(doc)
-
-                except Exception as e:
-                    st.error(f"❌ Error al analizar la imagen: {e}")
-                finally:
-                    st.session_state.inicio_migracion = None  # reset
+                if "tiempos_zen" in reg:
+                    st.markdown("⏱️ **Modo zen:**")
+                    for i, t in enumerate(reg["tiempos_zen"], 1):
+                        inicio = datetime.fromisoformat(t['tiempo_inicio']).astimezone(tz).strftime("%H:%M:%S")
+                        fin = datetime.fromisoformat(t['tiempo_fin']).astimezone(tz).strftime("%H:%M:%S")
+                        duracion = round(t['duracion_segundos'])
+                        st.markdown(f"""
+**{i}. {t['nombre']}**
+- 🟢 Inicio: `{inicio}`
+- 🔴 Fin: `{fin}`
+- ⏱️ Duración: `{duracion} segundos`
+                        """)
+    else:
+        st.info("No hay sesiones completas registradas aún.")
 
 # === TAB 1: DETECCIÓN ===
 with tab1:
