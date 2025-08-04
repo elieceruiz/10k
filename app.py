@@ -63,43 +63,36 @@ tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección",
 with tab_migracion:
     st.subheader("🧪 Captura con cámara (fluida y ligera)")
 
-    # Registrar inicio apenas se entra
-    if "migracion_t_inicio_visual" not in st.session_state:
-        st.session_state.migracion_t_inicio_visual = time.time()
+    if "inicio_migracion" not in st.session_state:
+        st.session_state.inicio_migracion = None
 
+    st.markdown("### 📸 Toca el siguiente botón para abrir la cámara y capturar:")
     archivo = st.file_uploader(
-        label="📷 Toca para tomar foto (usa cámara móvil)",
+        label="📸 Capturar imagen",
         type=["jpg", "jpeg", "png"],
-        label_visibility="collapsed",
         key="migracion_uploader_fluido"
     )
 
     if archivo:
-        # Momento en que ya se cargó la imagen y se puede mostrar
-        t_visual_listo = time.time()
-        tiempo_carga_visual = round(t_visual_listo - st.session_state.migracion_t_inicio_visual, 2)
+        if st.session_state.inicio_migracion is None:
+            st.session_state.inicio_migracion = time.time()
 
         imagen = Image.open(archivo)
         imagen_reducida = reducir_imagen(imagen)
         imagen_b64 = convertir_imagen_base64(imagen_reducida)
 
         st.image(imagen, caption="✅ Foto tomada", use_container_width=True)
-        st.info(f"🖼️ Tiempo en cargar imagen y mostrarla: {tiempo_carga_visual} segundos")
-
-        # Guardar el tiempo para usar luego en cálculo total
-        st.session_state.migracion_t_visual_ok = t_visual_listo
-        st.session_state.migracion_b64 = imagen_b64
 
         if st.button("🔍 Analizar con GPT-4o"):
-            with st.spinner("🧠 Enlazando con GPT-4o..."):
+            with st.spinner("🧠 Analizando imagen con GPT-4o..."):
                 inicio_analisis = time.time()
                 try:
-                    b64_img = "data:image/jpeg;base64," + st.session_state.migracion_b64
+                    b64_img = "data:image/jpeg;base64," + imagen_b64
                     respuesta = openai.chat.completions.create(
                         model="gpt-4o",
                         messages=[
                             {"role": "user", "content": [
-                                {"type": "text", "text": "Detecta solo objetos visibles. Devuelve una lista clara, sin contexto adicional."},
+                                {"type": "text", "text": "Detecta solo objetos visibles. Devuelve una lista clara, sin contexto extra."},
                                 {"type": "image_url", "image_url": {"url": b64_img}}
                             ]}
                         ],
@@ -107,40 +100,35 @@ with tab_migracion:
                     )
                     fin_analisis = time.time()
 
-                    # Cálculos
-                    tiempo_api = round(fin_analisis - inicio_analisis, 2)
-                    tiempo_total = round(fin_analisis - st.session_state.migracion_t_inicio_visual, 2)
+                    tiempo_total = round(fin_analisis - st.session_state.inicio_migracion, 2)
+                    tiempo_analisis = round(fin_analisis - inicio_analisis, 2)
 
-                    # Procesar respuesta
                     contenido = respuesta.choices[0].message.content
                     objetos = [obj.strip("-• ").capitalize() for obj in contenido.split("\n") if obj.strip()]
 
-                    st.markdown("### 🧠 Análisis GPT-4o:")
-                    st.success(f"{tiempo_api} segundos")
-
-                    st.markdown("### 🕒 Tiempo total desde entrada hasta resultado:")
-                    st.info(f"{tiempo_total} segundos")
+                    st.success(f"✅ Análisis GPT-4o: {tiempo_analisis} segundos")
+                    st.json(objetos)
+                    st.info(f"⏱️ Tiempo desde carga hasta resultado: {tiempo_total} segundos")
 
                     st.markdown("### 📋 Lista de objetos detectados:")
-                    for idx, obj in enumerate(objetos):
-                        st.checkbox(obj, value=False, key=f"chk_migracion_{idx}")
+                    for obj in objetos:
+                        st.checkbox(obj, value=False, disabled=True, label_visibility="visible")
 
                     # Guardar en Mongo
                     doc = {
                         "timestamp": datetime.now(tz),
                         "objetos": objetos,
-                        "imagen_b64": st.session_state.migracion_b64,
-                        "tiempo_carga_visual": tiempo_carga_visual,
-                        "tiempo_analisis_segundos": tiempo_api,
+                        "imagen_b64": imagen_b64,
                         "tiempo_total_segundos": tiempo_total,
+                        "tiempo_analisis_segundos": tiempo_analisis,
                         "fuente": "migracion"
                     }
                     col.insert_one(doc)
 
                     # Reset
-                    for k in ["migracion_t_inicio_visual", "migracion_t_visual_ok", "migracion_b64"]:
-                        if k in st.session_state:
-                            del st.session_state[k]
+                    st.session_state.inicio_migracion = None
+                    st.session_state["migracion_uploader_fluido"] = None
+                    st.rerun()
 
                 except Exception as e:
                     st.error(f"❌ Error al analizar imagen: {e}")
