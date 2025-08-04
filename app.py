@@ -59,129 +59,136 @@ st.progress(progreso)
 # === PESTAÑAS ===
 tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección", "⏱️ Tiempo en vivo", "📚 Historial"])
 
-# === TAB MIGRACIÓN ADAPTADA ===
+# === PESTAÑA: ORDEN Y UBICACIÓN DE ELEMENTOS DETECTADOS ===
 with tab_migracion:
-    st.subheader("🧪 Captura con cámara + Modo Zen")
+    st.subheader("📸 Captura y ubicación de elementos")
 
-    col_zen = db["ubicaciones_zen"]
+    # === Sesión inicial ===
+    if "flujo_etapa" not in st.session_state:
+        st.session_state["flujo_etapa"] = "esperando_foto"
+        st.session_state["elementos_detectados"] = []
+        st.session_state["orden_seleccionado"] = []
+        st.session_state["elemento_actual"] = None
+        st.session_state["inicio_cronometro"] = None
+        st.session_state["duraciones"] = []
+        st.session_state["ubicaciones"] = []
+        st.session_state["index"] = 0
 
-    # Inicializar estados
-    for key in ["foto_cargada", "objetos_detectados", "orden_confirmado", "orden_final", "indice_actual", "cronometro_inicio", "tiempos_zen"]:
-        if key not in st.session_state:
-            st.session_state[key] = None if key not in ["objetos_detectados", "orden_final", "tiempos_zen"] else []
+    # === Etapa 1: Captura ===
+    if st.session_state["flujo_etapa"] == "esperando_foto":
+        st.info("📷 Toma o sube una foto para iniciar.")
+        archivo = st.file_uploader("Capturar imagen", type=["jpg", "jpeg", "png"], key="uploader_ubicacion")
 
-    # 1. Subida de imagen y análisis con GPT
-    if st.session_state["foto_cargada"] is None:
-        archivo = st.file_uploader("📷 Toca para tomar foto (cámara móvil)", type=["jpg", "jpeg", "png"], label_visibility="collapsed", key="foto_gpt4o")
         if archivo:
-            st.session_state["foto_cargada"] = Image.open(archivo)
-            imagen_reducida = reducir_imagen(st.session_state["foto_cargada"])
-            st.session_state["imagen_b64"] = convertir_imagen_base64(imagen_reducida)
-            st.rerun()
+            with st.spinner("📷 Cargando imagen..."):
+                img = Image.open(archivo)
+                b64_img = convertir_imagen_base64(img)
+                st.session_state["imagen_base64"] = "data:image/jpeg;base64," + b64_img
+                st.image(img, caption="✅ Imagen cargada", use_container_width=True)
+                st.session_state["flujo_etapa"] = "analizando"
+                st.rerun()
 
-    elif st.session_state["foto_cargada"] and not st.session_state["objetos_detectados"]:
-        st.image(st.session_state["foto_cargada"], caption="✅ Foto cargada", use_container_width=True)
-        with st.spinner("🧠 Analizando con GPT-4o..."):
+    # === Etapa 2: Análisis GPT-4o ===
+    elif st.session_state["flujo_etapa"] == "analizando":
+        with st.spinner("🤖 Analizando imagen con GPT-4o..."):
             try:
-                b64_img = "data:image/jpeg;base64," + st.session_state["imagen_b64"]
                 respuesta = openai.chat.completions.create(
                     model="gpt-4o",
                     messages=[
                         {"role": "user", "content": [
-                            {"type": "text", "text": "Detecta solo objetos visibles. Devuelve una lista clara, sin contexto extra."},
-                            {"type": "image_url", "image_url": {"url": b64_img}}
+                            {"type": "text", "text": "Detecta objetos visibles y devuélvelos como lista JSON simple, sin contexto."},
+                            {"type": "image_url", "image_url": {"url": st.session_state["imagen_base64"]}}
                         ]}
                     ],
                     max_tokens=300
                 )
-                contenido = respuesta.choices[0].message.content
-                objetos = [obj.strip("-• ").capitalize() for obj in contenido.split("\n") if obj.strip()]
-                st.session_state["objetos_detectados"] = objetos
+                texto = respuesta.choices[0].message.content
+                objetos = [o.strip("-• ").capitalize() for o in texto.split("\n") if o.strip()]
+                st.session_state["elementos_detectados"] = objetos
+                st.session_state["flujo_etapa"] = "ordenar"
+                st.success(f"✅ {len(objetos)} elementos detectados")
+                st.rerun()
             except Exception as e:
-                st.error(f"❌ Error en la detección: {e}")
-                st.session_state["foto_cargada"] = None
+                st.error(f"❌ Error al analizar: {e}")
 
-    # 2. Selección ordenada de objetos
-    if st.session_state["objetos_detectados"] and not st.session_state["orden_confirmado"]:
-        seleccionados = st.session_state["orden_final"]
-        st.markdown("### ✋ Toca los objetos que vas a ubicar, en orden:")
+    # === Etapa 3: Selección ordenada ===
+    elif st.session_state["flujo_etapa"] == "ordenar":
+        st.markdown("### 🧠 Seleccioná los elementos en el orden que vas a ubicarlos")
+        seleccionados = st.session_state["orden_seleccionado"]
+        opciones = [e for e in st.session_state["elementos_detectados"] if e not in seleccionados]
+
         cols = st.columns(3)
-        for i, obj in enumerate(st.session_state["objetos_detectados"]):
-            if obj not in seleccionados:
-                with cols[i % 3]:
-                    if st.button(obj):
-                        seleccionados.append(obj)
-                        st.rerun()
-
-        if seleccionados:
-            st.markdown("🧩 Orden seleccionado:")
-            st.write([f"{i+1}. {x}" for i, x in enumerate(seleccionados)])
-
-            if st.button("✅ Confirmar orden"):
-                st.session_state["orden_confirmado"] = True
-                st.session_state["indice_actual"] = 0
+        for i, e in enumerate(opciones):
+            if cols[i % 3].button(e):
+                st.session_state["orden_seleccionado"].append(e)
                 st.rerun()
 
-    # 3. Ejecución Modo Zen
-    elif st.session_state["orden_confirmado"] and st.session_state["indice_actual"] is not None:
-        tareas = st.session_state["orden_final"]
-        idx = st.session_state["indice_actual"]
+        if seleccionados:
+            st.markdown("#### ✅ Orden actual:")
+            st.write(" → ".join(seleccionados))
 
-        if idx < len(tareas):
-            actual = tareas[idx]
-            st.header(f"📍 {idx+1}. Ubicar: **{actual}**")
+        if seleccionados:
+            if st.button("✅ Confirmar orden"):
+                st.session_state["flujo_etapa"] = "ejecucion"
+                st.session_state["elemento_actual"] = seleccionados[0]
+                st.session_state["inicio_cronometro"] = time.time()
+                st.rerun()
 
-            if st.session_state["cronometro_inicio"] is None:
-                if st.button("🎯 Empezar tarea"):
-                    st.session_state["cronometro_inicio"] = datetime.now(tz)
-                    st.rerun()
+    # === Etapa 4: Ejecución secuencial ===
+    elif st.session_state["flujo_etapa"] == "ejecucion":
+        actual = st.session_state["elemento_actual"]
+        st.markdown(f"### 🟢 Ubicando: `{actual}`")
+        cronometro = st.empty()
+        duracion = int(time.time() - st.session_state["inicio_cronometro"])
+        cronometro.markdown(f"🕒 Tiempo: `{timedelta(seconds=duracion)}`")
+
+        if st.button("⏹ Finalizar y registrar ubicación"):
+            st.session_state["duraciones"].append(duracion)
+            st.session_state["flujo_etapa"] = "ubicacion"
+            st.rerun()
+
+    # === Etapa 5: Ubicar el elemento ===
+    elif st.session_state["flujo_etapa"] == "ubicacion":
+        actual = st.session_state["elemento_actual"]
+        ubicacion = st.text_input(f"¿Dónde quedó ubicado '{actual}'?", key=f"ubicacion_{actual}")
+
+        if st.button("💾 Guardar ubicación"):
+            st.session_state["ubicaciones"].append(ubicacion)
+            st.session_state["index"] += 1
+
+            if st.session_state["index"] < len(st.session_state["orden_seleccionado"]):
+                nuevo = st.session_state["orden_seleccionado"][st.session_state["index"]]
+                st.session_state["elemento_actual"] = nuevo
+                st.session_state["inicio_cronometro"] = time.time()
+                st.session_state["flujo_etapa"] = "ejecucion"
+                st.rerun()
             else:
-                cronometro = st.empty()
-                fin_button = st.button("✅ Terminé de ubicar")
+                st.session_state["flujo_etapa"] = "resumen"
+                st.rerun()
 
-                while True:
-                    ahora = datetime.now(tz)
-                    transcurrido = ahora - st.session_state["cronometro_inicio"]
-                    cronometro.markdown(f"⏱️ Duración: `{str(transcurrido).split('.')[0]}`")
-                    time.sleep(1)
+    # === Etapa final: Resumen y guardar ===
+    elif st.session_state["flujo_etapa"] == "resumen":
+        st.success("✅ Ubicación completada")
+        resumen = pd.DataFrame({
+            "Elemento": st.session_state["orden_seleccionado"],
+            "Ubicación": st.session_state["ubicaciones"],
+            "Duración": [str(timedelta(seconds=d)) for d in st.session_state["duraciones"]]
+        })
+        st.dataframe(resumen, use_container_width=True)
 
-                    if fin_button:
-                        lugar = st.text_input("📝 ¿Dónde quedó ubicado?")
-                        if lugar:
-                            fin = datetime.now(tz)
-                            st.session_state["tiempos_zen"].append({
-                                "objeto": actual,
-                                "inicio": st.session_state["cronometro_inicio"].isoformat(),
-                                "fin": fin.isoformat(),
-                                "duracion_segundos": (fin - st.session_state["cronometro_inicio"]).total_seconds(),
-                                "ubicacion": lugar
-                            })
-                            st.session_state["indice_actual"] += 1
-                            st.session_state["cronometro_inicio"] = None
-                            st.rerun()
-                        else:
-                            st.warning("⚠️ Escribe dónde quedó ubicado el objeto.")
-        else:
-            st.success("🎉 ¡Todos los objetos fueron ubicados!")
+        if st.button("📦 Guardar todo en base de datos"):
+            for i in range(len(st.session_state["orden_seleccionado"])):
+                col.insert_one({
+                    "elemento": st.session_state["orden_seleccionado"][i],
+                    "ubicacion": st.session_state["ubicaciones"][i],
+                    "duracion": st.session_state["duraciones"][i],
+                    "timestamp": datetime.now(tz)
+                })
+            st.success("✅ Todo registrado")
 
-            # Guardar todo
-            col.insert_one({
-                "timestamp": datetime.now(tz),
-                "objetos": st.session_state["orden_final"],
-                "imagen_b64": st.session_state["imagen_b64"],
-                "tiempos_zen": st.session_state["tiempos_zen"],
-                "fuente": "migracion_zen"
-            })
-
-            # Guardar ubicación por separado
-            for t in st.session_state["tiempos_zen"]:
-                col_zen.insert_one(t)
-
-            # Reset
-            for k in ["foto_cargada", "objetos_detectados", "orden_confirmado", "orden_final", "indice_actual", "cronometro_inicio", "tiempos_zen", "imagen_b64"]:
-                st.session_state[k] = None if k not in ["orden_final", "tiempos_zen"] else []
-
-            st.balloons()
+            # Reiniciar todo
+            for key in ["flujo_etapa", "elementos_detectados", "orden_seleccionado", "elemento_actual", "inicio_cronometro", "duraciones", "ubicaciones", "index", "imagen_base64"]:
+                st.session_state.pop(key, None)
             st.rerun()
 
 # === TAB 1: DETECCIÓN ===
