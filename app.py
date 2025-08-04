@@ -1,9 +1,10 @@
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, timedelta
 import base64
 import openai
 from pymongo import MongoClient
 import pytz
+import time
 
 # === CONFIGURACIÓN ===
 st.set_page_config(page_title="🧠 orden-ador", layout="centered")
@@ -13,6 +14,7 @@ openai.api_key = st.secrets["openai_api_key"]
 client = MongoClient(st.secrets["mongo_uri"])
 db = client["ordenador"]
 historial_col = db["historial"]
+dev_col = db["dev_tracker"]
 
 tz = pytz.timezone("America/Bogota")
 
@@ -49,12 +51,42 @@ def detectar_objetos_con_openai(imagen_bytes):
 # === INTERFAZ ===
 seccion = st.selectbox("¿Dónde estás trabajando?", ["⏱ Desarrollo", "📸 Ordenador", "📂 Historial"])
 
-# === OPCIÓN 1: Desarrollo (vacío) ===
+# === OPCIÓN 1: Desarrollo
 if seccion == "⏱ Desarrollo":
-    st.subheader("⏱ Módulo de desarrollo")
-    st.info("Esta sección aún no está implementada.")
+    st.subheader("⏱ Tiempo dedicado al desarrollo de orden-ador")
 
-# === OPCIÓN 2: Ordenador (funcional con OpenAI) ===
+    evento = dev_col.find_one({"tipo": "ordenador_dev", "en_curso": True})
+
+    if evento:
+        hora_inicio = evento["inicio"].astimezone(tz)
+        segundos_transcurridos = int((datetime.now(tz) - hora_inicio).total_seconds())
+        st.success(f"🧠 Desarrollo en curso desde las {hora_inicio.strftime('%H:%M:%S')}")
+        cronometro = st.empty()
+        stop_button = st.button("⏹️ Finalizar desarrollo")
+
+        for i in range(segundos_transcurridos, segundos_transcurridos + 100000):
+            if stop_button:
+                dev_col.update_one(
+                    {"_id": evento["_id"]},
+                    {"$set": {"fin": datetime.now(tz), "en_curso": False}}
+                )
+                st.success("✅ Registro finalizado.")
+                st.rerun()
+
+            duracion = str(timedelta(seconds=i))
+            cronometro.markdown(f"### ⏱️ Duración: {duracion}")
+            time.sleep(1)
+
+    else:
+        if st.button("🟢 Iniciar desarrollo"):
+            dev_col.insert_one({
+                "tipo": "ordenador_dev",
+                "inicio": datetime.now(tz),
+                "en_curso": True
+            })
+            st.rerun()
+
+# === OPCIÓN 2: Ordenador (visión + ejecución)
 elif seccion == "📸 Ordenador":
     st.subheader("📸 Ordenador con visión GPT-4o")
 
@@ -93,7 +125,52 @@ elif seccion == "📸 Ordenador":
             st.session_state.orden_en_ejecucion = None
             st.session_state.orden_timer_start = None
 
-# === OPCIÓN 3: Historial (vacío) ===
+# === OPCIÓN 3: Historial
 elif seccion == "📂 Historial":
     st.subheader("📂 Historial de ejecución")
-    st.info("Esta sección aún no está implementada.")
+
+    # --- BLOQUE 1: Ejecuciones desde visión ---
+    st.markdown("### 🧩 Objetos ejecutados con visión")
+
+    registros = list(historial_col.find().sort("timestamp", -1))
+
+    if registros:
+        data_vision = []
+        for i, reg in enumerate(registros, 1):
+            fecha = reg["timestamp"].astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
+            data_vision.append({
+                "#": i,
+                "Ítem": reg["ítem"],
+                "Duración": reg["duración"],
+                "Fecha": fecha
+            })
+        st.dataframe(data_vision, use_container_width=True)
+    else:
+        st.info("No hay ejecuciones registradas desde la visión.")
+
+    # --- BLOQUE 2: Sesiones de desarrollo ---
+    st.markdown("### ⌛ Tiempo dedicado al desarrollo")
+
+    sesiones = list(dev_col.find({"en_curso": False}).sort("inicio", -1))
+    total_segundos = 0
+    data_dev = []
+
+    for i, sesion in enumerate(sesiones, 1):
+        ini = sesion["inicio"].astimezone(tz)
+        fin = sesion.get("fin", ini).astimezone(tz)
+        segundos = int((fin - ini).total_seconds())
+        total_segundos += segundos
+
+        duracion = str(timedelta(seconds=segundos))
+        data_dev.append({
+            "#": i,
+            "Inicio": ini.strftime("%Y-%m-%d %H:%M:%S"),
+            "Fin": fin.strftime("%Y-%m-%d %H:%M:%S"),
+            "Duración": duracion
+        })
+
+    if data_dev:
+        st.dataframe(data_dev, use_container_width=True)
+        st.markdown(f"**🧠 Total acumulado:** `{str(timedelta(seconds=total_segundos))}`")
+    else:
+        st.info("No hay sesiones de desarrollo finalizadas.")
