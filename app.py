@@ -38,27 +38,36 @@ def reducir_imagen(imagen, max_ancho=600):
     return imagen
 
 # === SESSION STATE ===
-for key in ["seleccionados", "modo_zen", "tareas_zen", "indice_actual", "cronometro_inicio", "tiempos_zen", "mongo_id", "imagen_cargada", "nombre_archivo", "objetos_actuales"]:
-    if key not in st.session_state:
-        st.session_state[key] = None if key != "seleccionados" else []
-
-if "file_uploader_key" not in st.session_state:
-    st.session_state["file_uploader_key"] = "uploader_0"
+valores_por_defecto = {
+    "seleccionados": [],
+    "modo_zen": None,
+    "tareas_zen": None,
+    "indice_actual": None,
+    "cronometro_inicio": None,
+    "tiempos_zen": None,
+    "mongo_id": None,
+    "imagen_cargada": None,
+    "nombre_archivo": None,
+    "objetos_actuales": None,
+    "file_uploader_key": "uploader_0",
+}
+for k, v in valores_por_defecto.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 # === RESUMEN TOTAL DE TIEMPOS ===
-total_segundos = 0
-for reg in col.find({"tiempos_zen": {"$exists": True}}):
-    for entrada in reg["tiempos_zen"]:
-        total_segundos += entrada.get("duracion_segundos", 0)
-
+total_segundos = sum(
+    entrada.get("duracion_segundos", 0)
+    for reg in col.find({"tiempos_zen": {"$exists": True}})
+    for entrada in reg["tiempos_zen"]
+)
 total_horas = total_segundos / 3600
 progreso = min(total_horas / 10000, 1.0)
-
 st.markdown(f"### ⏳ Progreso total: {round(total_horas, 2)} / 10.000 horas")
 st.progress(progreso)
 
-# === PESTAÑAS PRINCIPALES ===
-tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección", "⏱️ Tiempo en vivo", "📚 Historial"])
+# === PESTAÑAS ACTIVAS ===
+tab_migracion, tab_historial = st.tabs(["🧪 Migración", "📚 Historial"])
 
 # === TAB: MIGRACIÓN ===
 with tab_migracion:
@@ -75,8 +84,10 @@ with tab_migracion:
         st.session_state["objeto_en_ubicacion"] = None
         st.session_state["inicio_ubicacion"] = None
 
+    fase = st.session_state["fase"]
+
     # === FASE 1: Subir y analizar imagen ===
-    if st.session_state["fase"] == "espera_foto":
+    if fase == "espera_foto":
         archivo = st.file_uploader(
             label="📷 Toca para tomar foto (usa cámara móvil)",
             type=["jpg", "jpeg", "png"],
@@ -85,7 +96,7 @@ with tab_migracion:
         )
 
         if archivo:
-            with st.status("🌀 Enviando imagen... Analizando... Esto puede tardar unos segundos.", expanded=True) as status:
+            with st.status("🌀 Enviando imagen... Analizando...", expanded=True) as status:
                 imagen = Image.open(archivo)
                 st.write("Reduciendo imagen para optimizar...")
                 imagen_reducida = reducir_imagen(imagen)
@@ -122,8 +133,8 @@ with tab_migracion:
                     st.error(f"❌ Error al analizar imagen: {e}")
                     status.update(label="❌ Falló el procesamiento de la imagen.", state="error", expanded=True)
 
-    # === FASE 2: Selección ordenada ===
-    elif st.session_state["fase"] == "seleccion_orden":
+    # === FASE 2: Selección de orden ===
+    elif fase == "seleccion_orden":
         st.image(st.session_state["imagen_para_mostrar"], caption="✅ Imagen cargada", use_container_width=True)
         st.markdown("### 🧩 Selecciona los objetos que vas a ubicar (en orden)")
 
@@ -143,7 +154,7 @@ with tab_migracion:
             st.rerun()
 
     # === FASE 3: Espera de inicio ===
-    elif st.session_state["fase"] == "espera_inicio":
+    elif fase == "espera_inicio":
         st.success("✅ Orden confirmado.")
         objeto_actual = st.selectbox("Selecciona el objeto que vas a ubicar:", st.session_state["orden_confirmado"])
         if st.button("🟢 Iniciar ubicación"):
@@ -154,7 +165,7 @@ with tab_migracion:
             st.rerun()
 
     # === FASE 4: Ubicación en progreso ===
-    elif st.session_state["fase"] == "ubicando":
+    elif fase == "ubicando":
         objeto = st.session_state["objeto_en_ubicacion"]
         inicio = st.session_state["inicio_ubicacion"]
         ahora = datetime.now(tz)
@@ -188,143 +199,16 @@ with tab_migracion:
             else:
                 st.success("🎉 Todos los objetos fueron ubicados.")
                 st.balloons()
-                for k in ["fase", "objetos_detectados", "orden_objetos", "orden_confirmado", "imagen_b64", "imagen_para_mostrar", "en_progreso", "objeto_en_ubicacion", "inicio_ubicacion"]:
+                for k in [
+                    "fase", "objetos_detectados", "orden_objetos", "orden_confirmado",
+                    "imagen_b64", "imagen_para_mostrar", "en_progreso",
+                    "objeto_en_ubicacion", "inicio_ubicacion"
+                ]:
                     st.session_state.pop(k, None)
-
             st.rerun()
 
-# === TAB: DETECCIÓN ===
-with tab1:
-    uploaded_file = st.file_uploader("📤 Sube una imagen", type=["jpg", "jpeg", "png"], key=st.session_state["file_uploader_key"])
-    if uploaded_file:
-        imagen = Image.open(uploaded_file)
-        st.image(imagen, caption="✅ Imagen cargada", use_container_width=True)
-        st.session_state.imagen_cargada = imagen
-        st.session_state.nombre_archivo = uploaded_file.name
-
-    if st.button("🔍 Detectar objetos"):
-        with st.spinner("Analizando imagen con GPT-4o..."):
-            try:
-                b64_img = "data:image/jpeg;base64," + convertir_imagen_base64(imagen)
-                respuesta = openai.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "user", "content": [
-                            {"type": "text", "text": "Detecta solo objetos u elementos visibles. Devuelve una lista clara y concisa de los objetos sin descripciones largas ni contexto adicional."},
-                            {"type": "image_url", "image_url": {"url": b64_img}}
-                        ]}
-                    ],
-                    max_tokens=300,
-                )
-                contenido = respuesta.choices[0].message.content
-                objetos = [obj.strip("-• ") for obj in contenido.split("\n") if obj.strip()]
-                st.session_state.seleccionados = []
-                st.session_state.objetos_actuales = objetos
-                st.session_state.modo_zen = False
-                st.session_state.tiempos_zen = []
-                st.session_state.mongo_id = None
-
-                if objetos:
-                    st.success("✅ Objetos detectados:")
-                    st.write(objetos)
-                else:
-                    st.warning("⚠️ No se detectaron objetos en la imagen.")
-            except Exception as e:
-                st.error(f"Error en la detección: {e}")
-
-    if st.session_state.objetos_actuales:
-        restantes = [obj for obj in st.session_state.objetos_actuales if obj not in st.session_state.seleccionados]
-        st.markdown("**🖱️ Marca los elementos para la tarea monotarea:**")
-        for obj in restantes:
-            if st.checkbox(obj, key=f"chk_{obj}"):
-                st.session_state.seleccionados.append(obj)
-                st.rerun()
-
-        if st.session_state.seleccionados:
-            seleccionados_numerados = [f"{i+1}. {item}" for i, item in enumerate(st.session_state.seleccionados)]
-            st.markdown("**📋 Orden de ejecución:**")
-            st.multiselect("Seleccionados:", options=seleccionados_numerados, default=seleccionados_numerados, disabled=True)
-
-        if st.button("🧘 Empezamos a ordenar"):
-            if st.session_state["imagen_cargada"] is None:
-                st.error("❌ No se encontró la imagen cargada.")
-            else:
-                with st.spinner("⏳ Guardando sesión y preparando modo zen..."):
-                    imagen_reducida = reducir_imagen(st.session_state["imagen_cargada"])
-                    imagen_b64 = convertir_imagen_base64(imagen_reducida)
-                    doc = {
-                        "timestamp": datetime.now(tz),
-                        "objetos": st.session_state.objetos_actuales,
-                        "nombre_archivo": st.session_state["nombre_archivo"],
-                        "imagen_b64": imagen_b64
-                    }
-                    inserted = col.insert_one(doc)
-                    st.session_state.mongo_id = inserted.inserted_id
-                    st.session_state.tareas_zen = st.session_state.seleccionados.copy()
-                    st.session_state.indice_actual = 0
-                    st.session_state.modo_zen = True
-
-                    st.session_state.seleccionados = []
-                    st.session_state.objetos_actuales = []
-                    st.session_state.imagen_cargada = None
-                    st.session_state.nombre_archivo = None
-                    st.session_state["file_uploader_key"] = str(datetime.now().timestamp())
-
-                    st.success("✅ Guardado. Ve a la pestaña **⏱️ Tiempo en vivo** para comenzar.")
-                    time.sleep(1)
-                    st.rerun()
-
-# === TAB: TIEMPO EN VIVO ===
-with tab2:
-    if st.session_state.modo_zen and st.session_state.indice_actual is not None:
-        tareas = st.session_state.tareas_zen
-        idx = st.session_state.indice_actual
-
-        if idx < len(tareas):
-            tarea = tareas[idx]
-            st.header(f"🧘 Tarea {idx + 1} de {len(tareas)}: {tarea}")
-
-            if st.session_state.cronometro_inicio is None:
-                if st.button("🎯 Empezar tarea"):
-                    st.session_state.cronometro_inicio = datetime.now(tz)
-                    st.rerun()
-            else:
-                cronometro_placeholder = st.empty()
-                stop_button = st.button("✅ Tarea completada", key=f"done_{idx}")
-
-                while True:
-                    ahora = datetime.now(tz)
-                    tiempo_transcurrido = ahora - st.session_state.cronometro_inicio
-                    tiempo_str = str(tiempo_transcurrido).split(".")[0]
-                    cronometro_placeholder.info(f"⏱ Tiempo: {tiempo_str}")
-                    time.sleep(1)
-
-                    if stop_button:
-                        fin = datetime.now(tz)
-                        st.session_state.tiempos_zen.append({
-                            "nombre": tarea,
-                            "tiempo_inicio": st.session_state.cronometro_inicio.isoformat(),
-                            "tiempo_fin": fin.isoformat(),
-                            "duracion_segundos": (fin - st.session_state.cronometro_inicio).total_seconds()
-                        })
-                        st.session_state.indice_actual += 1
-                        st.session_state.cronometro_inicio = None
-                        st.rerun()
-                        break
-        else:
-            st.success("🎉 Modo zen completado. Tiempos registrados.")
-            if st.session_state.mongo_id:
-                col.update_one(
-                    {"_id": st.session_state.mongo_id},
-                    {"$set": {"tiempos_zen": st.session_state.tiempos_zen}}
-                )
-            else:
-                st.warning("No se encontró ID de sesión para guardar los tiempos.")
-    else:
-        st.info("El modo zen no ha comenzado.")
-
 # === TAB: HISTORIAL ===
-with tab3:
+with tab_historial:
     registros = list(col.find().sort("timestamp", -1))
     if registros:
         for reg in registros:
@@ -334,7 +218,7 @@ with tab3:
                     st.image(Image.open(BytesIO(base64.b64decode(reg["imagen_b64"]))), width=300, caption="📸 Imagen registrada")
 
                 st.write("📦 Objetos detectados:")
-                for i, obj in enumerate(reg.get("objetos", []), 1):
+                for obj in reg.get("objetos", []):
                     st.write(f"- {obj}")
 
                 if "tiempos_zen" in reg:
