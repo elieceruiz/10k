@@ -21,6 +21,8 @@ tz = pytz.timezone("America/Bogota")
 # Estado base
 for key, val in {
     "orden_detectados": [],
+    "orden_elegidos": [],
+    "orden_confirmado": False,
     "orden_asignados": [],
     "orden_en_ejecucion": None,
     "orden_timer_start": None
@@ -54,86 +56,96 @@ seccion = st.selectbox("¿Dónde estás trabajando?", ["⏱ Desarrollo", "📸 O
 # === OPCIÓN 1: Desarrollo
 if seccion == "⏱ Desarrollo":
     st.subheader("⏱ Tiempo dedicado al desarrollo de orden-ador")
-
     evento = dev_col.find_one({"tipo": "ordenador_dev", "en_curso": True})
-
     if evento:
         hora_inicio = evento["inicio"].astimezone(tz)
         segundos_transcurridos = int((datetime.now(tz) - hora_inicio).total_seconds())
         st.success(f"🧠 Desarrollo en curso desde las {hora_inicio.strftime('%H:%M:%S')}")
         cronometro = st.empty()
         stop_button = st.button("⏹️ Finalizar desarrollo")
-
         for i in range(segundos_transcurridos, segundos_transcurridos + 100000):
             if stop_button:
-                dev_col.update_one(
-                    {"_id": evento["_id"]},
-                    {"$set": {"fin": datetime.now(tz), "en_curso": False}}
-                )
+                dev_col.update_one({"_id": evento["_id"]}, {"$set": {"fin": datetime.now(tz), "en_curso": False}})
                 st.success("✅ Registro finalizado.")
                 st.rerun()
-
             duracion = str(timedelta(seconds=i))
             cronometro.markdown(f"### ⏱️ Duración: {duracion}")
             time.sleep(1)
-
     else:
         if st.button("🟢 Iniciar desarrollo"):
-            dev_col.insert_one({
-                "tipo": "ordenador_dev",
-                "inicio": datetime.now(tz),
-                "en_curso": True
-            })
+            dev_col.insert_one({"tipo": "ordenador_dev", "inicio": datetime.now(tz), "en_curso": True})
             st.rerun()
 
-# === OPCIÓN 2: Ordenador (visión + ejecución)
+# === OPCIÓN 2: Ordenador
 elif seccion == "📸 Ordenador":
     st.subheader("📸 Ordenador con visión GPT-4o")
 
-    imagen = st.file_uploader("Subí una imagen", type=["jpg", "jpeg", "png"])
+    # Paso 1: Subir imagen y detectar objetos
+    if not st.session_state["orden_detectados"]:
+        imagen = st.file_uploader("Subí una imagen", type=["jpg", "jpeg", "png"])
+        if imagen:
+            with st.spinner("Detectando objetos..."):
+                detectados = detectar_objetos_con_openai(imagen.read())
+                st.session_state["orden_detectados"] = detectados
+                st.success("Detectados: " + ", ".join(detectados))
 
-    if imagen and not st.session_state.orden_detectados:
-        with st.spinner("Detectando objetos..."):
-            detectados = detectar_objetos_con_openai(imagen.read())
-            st.session_state.orden_detectados = detectados
-            st.success("Detectados: " + ", ".join(detectados))
+    # Paso 2: Selección ordenada de objetos
+    if st.session_state["orden_detectados"] and not st.session_state["orden_confirmado"]:
+        seleccionados = st.multiselect(
+            "Elegí los objetos en el orden que vas a ejecutar:",
+            options=st.session_state["orden_detectados"],
+            key="orden_elegidos",
+            placeholder="Tocá uno por uno en orden"
+        )
+        if seleccionados and st.button("✔️ Confirmar orden de ejecución"):
+            st.session_state["orden_asignados"] = seleccionados.copy()
+            st.session_state["orden_confirmado"] = True
+            st.success("Orden confirmado. Empezá a ejecutar cada ítem.")
 
-    opciones_restantes = [o for o in st.session_state.orden_detectados if o not in st.session_state.orden_asignados]
+    # Paso 3: Ejecución paso a paso
+    if st.session_state["orden_confirmado"] and not st.session_state["orden_en_ejecucion"]:
+        if st.session_state["orden_asignados"]:
+            siguiente = st.session_state["orden_asignados"][0]
+            st.subheader(f"🎯 Enfoque actual: **{siguiente}**")
+            if st.button("🚀 Iniciar ejecución"):
+                st.session_state["orden_en_ejecucion"] = siguiente
+                st.session_state["orden_timer_start"] = datetime.now(tz)
+        else:
+            st.success("✅ Todos los ítems fueron ejecutados.")
+            # Reset estado
+            st.session_state["orden_detectados"] = []
+            st.session_state["orden_elegidos"] = []
+            st.session_state["orden_confirmado"] = False
+            st.session_state["orden_asignados"] = []
+            st.session_state["orden_en_ejecucion"] = None
+            st.session_state["orden_timer_start"] = None
+            st.rerun()
 
-    if opciones_restantes and not st.session_state.orden_en_ejecucion:
-        seleccion = st.selectbox("Seleccioná el siguiente en el orden:", opciones_restantes)
-        if st.button("Asignar al orden"):
-            st.session_state.orden_asignados.append(seleccion)
-            st.success(f"'{seleccion}' agregado como paso #{len(st.session_state.orden_asignados)}")
-
-    if st.session_state.orden_asignados and not st.session_state.orden_en_ejecucion:
-        if st.button("Iniciar ejecución"):
-            st.session_state.orden_en_ejecucion = st.session_state.orden_asignados.pop(0)
-            st.session_state.orden_timer_start = datetime.now(tz)
-
-    if st.session_state.orden_en_ejecucion:
-        st.info(f"🟢 Ejecutando: **{st.session_state.orden_en_ejecucion}**")
-        tiempo = datetime.now(tz) - st.session_state.orden_timer_start
+    # Paso 4: Cronómetro ejecución
+    if st.session_state["orden_en_ejecucion"]:
+        actual = st.session_state["orden_en_ejecucion"]
+        inicio = st.session_state["orden_timer_start"]
+        tiempo = datetime.now(tz) - inicio
+        st.info(f"🟢 Ejecutando: **{actual}**")
         st.write(f"⏱ Tiempo transcurrido: {str(tiempo).split('.')[0]}")
-        if st.button("Finalizar este ítem"):
-            registro = {
-                "ítem": st.session_state.orden_en_ejecucion,
+        if st.button("✅ Finalizar este ítem"):
+            historial_col.insert_one({
+                "ítem": actual,
                 "duración": str(tiempo).split(".")[0],
                 "timestamp": datetime.now(tz),
-            }
-            historial_col.insert_one(registro)
-            st.session_state.orden_en_ejecucion = None
-            st.session_state.orden_timer_start = None
+            })
+            st.session_state["orden_asignados"].pop(0)
+            st.session_state["orden_en_ejecucion"] = None
+            st.session_state["orden_timer_start"] = None
+            st.rerun()
 
 # === OPCIÓN 3: Historial
 elif seccion == "📂 Historial":
     st.subheader("📂 Historial de ejecución")
 
-    # --- BLOQUE 1: Ejecuciones desde visión ---
+    # Historial visión
     st.markdown("### 🧩 Objetos ejecutados con visión")
-
     registros = list(historial_col.find().sort("timestamp", -1))
-
     if registros:
         data_vision = []
         for i, reg in enumerate(registros, 1):
@@ -148,19 +160,16 @@ elif seccion == "📂 Historial":
     else:
         st.info("No hay ejecuciones registradas desde la visión.")
 
-    # --- BLOQUE 2: Sesiones de desarrollo ---
+    # Historial desarrollo
     st.markdown("### ⌛ Tiempo dedicado al desarrollo")
-
     sesiones = list(dev_col.find({"en_curso": False}).sort("inicio", -1))
     total_segundos = 0
     data_dev = []
-
     for i, sesion in enumerate(sesiones, 1):
         ini = sesion["inicio"].astimezone(tz)
         fin = sesion.get("fin", ini).astimezone(tz)
         segundos = int((fin - ini).total_seconds())
         total_segundos += segundos
-
         duracion = str(timedelta(seconds=segundos))
         data_dev.append({
             "#": i,
@@ -168,7 +177,6 @@ elif seccion == "📂 Historial":
             "Fin": fin.strftime("%Y-%m-%d %H:%M:%S"),
             "Duración": duracion
         })
-
     if data_dev:
         st.dataframe(data_dev, use_container_width=True)
         st.markdown(f"**🧠 Total acumulado:** `{str(timedelta(seconds=total_segundos))}`")
