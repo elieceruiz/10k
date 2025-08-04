@@ -8,8 +8,10 @@ import pytz
 
 # === CONFIGURACIÓN ===
 st.set_page_config(page_title="🧠 orden-ador", layout="centered")
-openai.api_key = st.secrets["OPENAI_API_KEY"]
-client = MongoClient(st.secrets["MONGO_URI"])
+
+# Claves desde secrets (en minúscula, como las definiste)
+openai.api_key = st.secrets["openai_api_key"]
+client = MongoClient(st.secrets["mongo_uri"])
 db = client["ordenador"]
 historial_col = db["historial"]
 
