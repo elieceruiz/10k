@@ -193,10 +193,6 @@ with tab_migracion:
                     st.session_state.pop(k, None)
             st.rerun()
 
-# === TAB: TIEMPO EN VIVO (placeholder por ahora) ===
-with tab2:
-    st.info("⏱️ Módulo de tiempo en vivo aún no implementado en esta versión.")
-
 # === TAB: HISTORIAL ===
 with tab3:
     registros = list(col.find().sort("timestamp", -1))
