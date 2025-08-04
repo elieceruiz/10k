@@ -1,6 +1,6 @@
 streamlit
-pymongo
-openai
-pillow
-pytz
 streamlit-autorefresh
+pymongo
+pillow
+python-dotenv
+openai
