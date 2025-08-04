@@ -59,12 +59,123 @@ st.progress(progreso)
 # === PESTAÑAS ===
 tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección", "⏱️ Tiempo en vivo", "📚 Historial"])
 
+# === TAB MIGRACIÓN ===
 with tab_migracion:
     st.subheader("🧪 Captura con cámara (fluida y ligera)")
 
-    # Capturar el tiempo de entrada a la pestaña
-    if "inicio_espera_foto" not in st.session_state:
-        st.session_state["inicio_espera_foto
+    # Inicializar estados
+    for key, default in {
+        "inicio_espera_foto": None,
+        "foto_cargada": False,
+        "mostrar_resultado": False,
+        "objetos_detectados": [],
+        "pendientes_migra": [],
+        "seleccionados_migra": [],
+        "imagen_para_mostrar": None,
+    }.items():
+        if key not in st.session_state:
+            st.session_state[key] = default
+
+    # Captura de imagen
+    archivo = st.file_uploader(
+        label="📷 Toca para tomar foto (usa cámara móvil)",
+        type=["jpg", "jpeg", "png"],
+        label_visibility="collapsed",
+        key="migracion_uploader_fluido"
+    )
+
+    if archivo and not st.session_state["foto_cargada"]:
+        st.session_state["inicio_espera_foto"] = time.time()
+        imagen = Image.open(archivo)
+        imagen_reducida = reducir_imagen(imagen)
+        imagen_b64 = convertir_imagen_base64(imagen_reducida)
+
+        st.session_state["imagen_para_mostrar"] = imagen
+        st.session_state["imagen_b64"] = imagen_b64
+        st.session_state["foto_cargada"] = True
+        st.session_state["foto_tomada_timestamp"] = time.time()
+        st.rerun()
+
+    if st.session_state["foto_cargada"] and st.session_state["imagen_para_mostrar"]:
+        tiempo_carga = round(time.time() - st.session_state["foto_tomada_timestamp"], 2)
+        st.session_state["tiempo_carga"] = tiempo_carga
+        st.image(st.session_state["imagen_para_mostrar"], caption="✅ Foto cargada", use_container_width=True)
+        st.info(f"⏱️ Tiempo desde que se tomó hasta que cargó: {tiempo_carga} segundos")
+
+        # Botón de análisis
+        if st.button("🔍 Analizar con GPT-4o"):
+            with st.spinner("🧠 Enviando imagen a GPT-4o..."):
+                inicio_analisis = time.time()
+
+                try:
+                    b64_img = "data:image/jpeg;base64," + st.session_state["imagen_b64"]
+                    respuesta = openai.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[
+                            {"role": "user", "content": [
+                                {"type": "text", "text": "Detecta solo objetos visibles. Devuelve una lista clara, sin contexto extra."},
+                                {"type": "image_url", "image_url": {"url": b64_img}}
+                            ]}
+                        ],
+                        max_tokens=300
+                    )
+                    tiempo_analisis = round(time.time() - inicio_analisis, 2)
+
+                    contenido = respuesta.choices[0].message.content
+                    objetos = [obj.strip("-• ").capitalize() for obj in contenido.split("\n") if obj.strip()]
+
+                    st.session_state["objetos_detectados"] = objetos
+                    st.session_state["pendientes_migra"] = objetos.copy()
+                    st.session_state["seleccionados_migra"] = []
+                    st.session_state["mostrar_resultado"] = True
+                    st.session_state["tiempo_analisis"] = tiempo_analisis
+
+                    # Guardar en MongoDB
+                    col.insert_one({
+                        "timestamp": datetime.now(tz),
+                        "objetos": objetos,
+                        "imagen_b64": st.session_state["imagen_b64"],
+                        "tiempo_total_segundos": st.session_state["tiempo_carga"] + tiempo_analisis,
+                        "tiempo_espera_previo": st.session_state["tiempo_carga"],
+                        "tiempo_analisis_api": tiempo_analisis,
+                        "fuente": "migracion"
+                    })
+
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"❌ Error al analizar imagen: {e}")
+
+    # Mostrar resultados con checkboxes dinámicos
+    if st.session_state.get("mostrar_resultado"):
+        st.success(f"🧠 Análisis GPT-4o: {st.session_state['tiempo_analisis']} segundos")
+
+        st.markdown("### 📋 Lista de objetos detectados:")
+
+        for obj in st.session_state["pendientes_migra"][:]:  # Copia para no romper iteración
+            if st.checkbox(obj, key=f"chk_migra_{obj}"):
+                st.session_state["pendientes_migra"].remove(obj)
+                st.session_state["seleccionados_migra"].append(obj)
+                st.rerun()
+
+        if st.session_state["seleccionados_migra"]:
+            st.multiselect(
+                "🗂️ Objetos seleccionados:",
+                options=st.session_state["seleccionados_migra"],
+                default=st.session_state["seleccionados_migra"],
+                key="multiselect_migra"
+            )
+
+        if st.button("🔄 Nueva captura"):
+            for key in [
+                "inicio_espera_foto", "foto_cargada", "mostrar_resultado",
+                "objetos_detectados", "imagen_para_mostrar", "imagen_b64",
+                "tiempo_carga", "tiempo_analisis", "pendientes_migra", "seleccionados_migra",
+                "foto_tomada_timestamp"
+            ]:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.rerun()
 
 # === TAB 1: DETECCIÓN ===
 with tab1:
