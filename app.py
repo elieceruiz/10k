@@ -54,7 +54,7 @@ def detectar_objetos_con_openai(imagen_bytes):
 # === NAVEGACIÓN PRINCIPAL ===
 seccion = st.selectbox("¿Dónde estás trabajando?", ["⏱ Desarrollo", "📸 Ordenador", "📂 Historial"])
 
-# === MÓDULO 1: DESARROLLO ===
+# === MÓDULO 1: DESARROLLO CON CRONÓMETRO EN VIVO ===
 if seccion == "⏱ Desarrollo":
     st.subheader("⏱ Tiempo dedicado al desarrollo de orden-ador")
 
@@ -66,15 +66,21 @@ if seccion == "⏱ Desarrollo":
             st.session_state.dev_total_seconds += elapsed
         st.session_state.dev_timer_running = not st.session_state.dev_timer_running
 
+    cronometro = st.empty()
+
     if st.session_state.dev_timer_running:
         elapsed = (datetime.now(tz) - st.session_state.dev_timer_start).total_seconds()
+        total = st.session_state.dev_total_seconds + elapsed
+        horas, rem = divmod(int(total), 3600)
+        minutos, segundos = divmod(rem, 60)
+        cronometro.metric("⏳ Tiempo acumulado", f"{horas:02}:{minutos:02}:{segundos:02}")
+        time.sleep(1)
+        st.rerun()
     else:
-        elapsed = 0
-
-    total = st.session_state.dev_total_seconds + elapsed
-    horas, rem = divmod(int(total), 3600)
-    minutos, segundos = divmod(rem, 60)
-    st.metric("Tiempo acumulado", f"{horas:02}:{minutos:02}:{segundos:02}")
+        total = st.session_state.dev_total_seconds
+        horas, rem = divmod(int(total), 3600)
+        minutos, segundos = divmod(rem, 60)
+        cronometro.metric("⏸ Tiempo acumulado", f"{horas:02}:{minutos:02}:{segundos:02}")
 
 # === MÓDULO 2: ORDENADOR ===
 elif seccion == "📸 Ordenador":
@@ -103,8 +109,9 @@ elif seccion == "📸 Ordenador":
 
     if st.session_state.orden_en_ejecucion:
         st.info(f"🟢 Ejecutando: **{st.session_state.orden_en_ejecucion}**")
+        cronometro = st.empty()
         tiempo = datetime.now(tz) - st.session_state.orden_timer_start
-        st.write(f"⏱ Tiempo transcurrido: {str(tiempo).split('.')[0]}")
+        cronometro.write(f"⏱ Tiempo transcurrido: {str(tiempo).split('.')[0]}")
         if st.button("Finalizar este ítem"):
             registro = {
                 "ítem": st.session_state.orden_en_ejecucion,
@@ -114,6 +121,9 @@ elif seccion == "📸 Ordenador":
             historial_col.insert_one(registro)
             st.session_state.orden_en_ejecucion = None
             st.session_state.orden_timer_start = None
+        else:
+            time.sleep(1)
+            st.rerun()
 
 # === MÓDULO 3: HISTORIAL ===
 elif seccion == "📂 Historial":
