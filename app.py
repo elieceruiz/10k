@@ -63,6 +63,9 @@ tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección",
 with tab_migracion:
     st.subheader("🧪 Captura con cámara (fluida y ligera)")
 
+    if "inicio_migracion" not in st.session_state:
+        st.session_state.inicio_migracion = None
+
     archivo = st.file_uploader(
         label="📷 Toca para tomar foto (usa cámara móvil)",
         type=["jpg", "jpeg", "png"],
@@ -71,20 +74,15 @@ with tab_migracion:
     )
 
     if archivo:
-        # — Inicia conteo de tiempo para carga de imagen —
-        inicio_carga = time.time()
+        # Marcar inicio solo una vez
+        if st.session_state.inicio_migracion is None:
+            st.session_state.inicio_migracion = time.time()
 
         imagen = Image.open(archivo)
         imagen_reducida = reducir_imagen(imagen)
         imagen_b64 = convertir_imagen_base64(imagen_reducida)
-
-        fin_carga = time.time()
-        duracion_carga = round(fin_carga - inicio_carga, 2)
-
-        # — Mostrar imagen cargada —
         st.image(imagen, caption="✅ Foto tomada", use_container_width=True)
 
-        # — Botón para análisis —
         if st.button("🔍 Analizar con GPT-4o"):
             with st.spinner("Analizando imagen..."):
                 inicio_analisis = time.time()
@@ -102,20 +100,36 @@ with tab_migracion:
                         max_tokens=300
                     )
                     fin_analisis = time.time()
-                    duracion_analisis = round(fin_analisis - inicio_analisis, 2)
 
-                    # — Procesar objetos —
+                    # Calcular duraciones
+                    tiempo_total = round(fin_analisis - st.session_state.inicio_migracion, 2)
+                    tiempo_analisis = round(fin_analisis - inicio_analisis, 2)
+
+                    # Procesar resultados
                     contenido = respuesta.choices[0].message.content
                     objetos = [obj.strip("-• ").capitalize() for obj in contenido.split("\n") if obj.strip()]
 
-                    # — Mostrar resultados minimalistas —
-                    st.success(f"✅ Objetos detectados en {duracion_analisis} segundos")
+                    # Mostrar resultados
+                    st.success(f"✅ Objetos detectados en {tiempo_analisis} segundos")
                     st.json(objetos)
-                    st.info(f"🖼 Tiempo desde carga hasta mostrar imagen: {duracion_carga} segundos")
+                    st.info(f"📥 Tiempo desde carga hasta resultado: {tiempo_total} segundos")
 
                     st.markdown("### 📋 Lista de objetos detectados:")
                     for obj in objetos:
                         st.checkbox(obj, value=False, disabled=True)
+
+                    # Guardar en Mongo
+                    doc = {
+                        "timestamp": datetime.now(tz),
+                        "objetos": objetos,
+                        "imagen_b64": imagen_b64,
+                        "tiempo_total_segundos": tiempo_total,
+                        "fuente": "migracion"
+                    }
+                    col.insert_one(doc)
+
+                    # Limpiar estado
+                    st.session_state.inicio_migracion = None
 
                 except Exception as e:
                     st.error(f"❌ Error al analizar imagen: {e}")
