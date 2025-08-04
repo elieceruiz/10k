@@ -45,29 +45,43 @@ for key in ["fase", "objeto_en_ubicacion", "inicio_ubicacion", "imagen_b64"]:
 # === PESTAÑAS ===
 tab_migracion, tab_historial = st.tabs(["🧪 Migración", "📚 Historial"])
 
-# === TAB MIGRACIÓN ===
+# === TAB: MIGRACIÓN ===
 with tab_migracion:
-    # Si no hay sesión activa, verifica si hay en Mongo
-    if not st.session_state["inicio_ubicacion"]:
-        doc_activo = col.find_one({"fin": None})
-        if doc_activo:
-            st.session_state["fase"] = "ubicando"
-            st.session_state["inicio_ubicacion"] = doc_activo["inicio"]
-            st.session_state["objeto_en_ubicacion"] = doc_activo["objeto"]
-            st.session_state["imagen_b64"] = doc_activo.get("imagen_b64")
-        else:
-            st.session_state["fase"] = "espera_foto"
+    st.subheader("🧪 Captura con cámara")
 
-    # === FASE: Espera de foto ===
+    # Inicialización de estado
+    estado_inicial = {
+        "fase": "espera_foto",
+        "objetos_detectados": [],
+        "orden_objetos": [],
+        "orden_confirmado": [],
+        "imagen_b64": None,
+        "imagen_para_mostrar": None,
+        "en_progreso": False,
+        "objeto_en_ubicacion": None,
+        "inicio_ubicacion": None
+    }
+
+    for k, v in estado_inicial.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+    # === FASE 1: Subir y analizar imagen ===
     if st.session_state["fase"] == "espera_foto":
-        archivo = st.file_uploader("📷 Sube una foto para análisis", type=["jpg", "jpeg", "png"])
-        if archivo:
-            imagen = Image.open(archivo)
-            imagen_reducida = reducir_imagen(imagen)
-            imagen_b64 = convertir_imagen_base64(imagen_reducida)
-            b64_img = "data:image/jpeg;base64," + imagen_b64
+        archivo = st.file_uploader(
+            label="📷 Toca para tomar foto (usa cámara móvil)",
+            type=["jpg", "jpeg", "png"],
+            label_visibility="collapsed",
+            key="uploader_migracion"
+        )
 
-            with st.spinner("⏳ Enviando imagen a GPT-4o..."):
+        if archivo:
+            with st.spinner("🌀 Procesando imagen..."):
+                imagen = Image.open(archivo)
+                imagen_reducida = reducir_imagen(imagen)
+                imagen_b64 = convertir_imagen_base64(imagen_reducida)
+                b64_img = "data:image/jpeg;base64," + imagen_b64
+
                 try:
                     respuesta = openai.chat.completions.create(
                         model="gpt-4o",
@@ -79,67 +93,90 @@ with tab_migracion:
                         ],
                         max_tokens=300
                     )
-                    texto = respuesta.choices[0].message.content
-                    objetos = [o.strip("-• ").capitalize() for o in texto.split("\n") if o.strip()]
+                    contenido = respuesta.choices[0].message.content
+                    objetos = [obj.strip("-• ").capitalize() for obj in contenido.split("\n") if obj.strip()]
 
                     if not objetos:
-                        st.warning("⚠️ No se detectaron objetos.")
+                        st.warning("🤔 No se detectaron objetos.")
                         st.stop()
 
-                    seleccion = st.selectbox("Selecciona el objeto a ubicar:", objetos)
-                    if seleccion and st.button("🟢 Iniciar ubicación"):
-                        ahora = datetime.now(tz)
-                        col.insert_one({
-                            "objeto": seleccion,
-                            "inicio": ahora,
-                            "fin": None,
-                            "imagen_b64": imagen_b64
-                        })
-                        st.session_state["fase"] = "ubicando"
-                        st.session_state["objeto_en_ubicacion"] = seleccion
-                        st.session_state["inicio_ubicacion"] = ahora
-                        st.session_state["imagen_b64"] = imagen_b64
-                        st.rerun()
+                    st.session_state["imagen_b64"] = imagen_b64
+                    st.session_state["imagen_para_mostrar"] = imagen
+                    st.session_state["objetos_detectados"] = objetos
+                    st.session_state["fase"] = "seleccion_orden"
+                    st.rerun()
 
                 except Exception as e:
-                    st.error(f"❌ Error al procesar imagen: {e}")
+                    st.error(f"❌ Error al analizar imagen: {e}")
 
-    # === FASE: Ubicando (cronómetro real) ===
+    # === FASE 2: Selección ordenada ===
+    elif st.session_state["fase"] == "seleccion_orden":
+        st.image(st.session_state["imagen_para_mostrar"], caption="✅ Imagen cargada", use_container_width=True)
+        st.markdown("### 🧩 Selecciona los objetos en el orden que vas a ubicar")
+
+        seleccion = st.multiselect(
+            "Toca en orden los objetos:",
+            options=st.session_state["objetos_detectados"],
+            default=st.session_state["orden_objetos"],
+            key="orden_objetos"
+        )
+
+        if seleccion:
+            st.session_state["orden_objetos"] = seleccion
+            st.info(f"🗂️ Orden actual: {', '.join(seleccion)}")
+
+        if seleccion and st.button("✅ Confirmar orden"):
+            st.session_state["orden_confirmado"] = seleccion.copy()
+            st.session_state["fase"] = "espera_inicio"
+            st.rerun()
+
+    # === FASE 3: Espera inicio ===
+    elif st.session_state["fase"] == "espera_inicio":
+        st.success("✅ Orden confirmado.")
+        objeto_actual = st.selectbox("Selecciona el objeto que vas a ubicar:", st.session_state["orden_confirmado"])
+        if st.button("🟢 Iniciar ubicación"):
+            st.session_state["objeto_en_ubicacion"] = objeto_actual
+            st.session_state["inicio_ubicacion"] = datetime.now(tz)
+            st.session_state["en_progreso"] = True
+            st.session_state["fase"] = "ubicando"
+            st.rerun()
+
+    # === FASE 4: Ubicando ===
     elif st.session_state["fase"] == "ubicando":
-        st.success(f"📍 Ubicando: `{st.session_state['objeto_en_ubicacion']}`")
-        cronometro = st.empty()
-
-        # Mostrar cronómetro en tiempo real sin bloquear
-        ahora = datetime.now(tz)
+        objeto = st.session_state["objeto_en_ubicacion"]
         inicio = st.session_state["inicio_ubicacion"]
-        duracion = ahora - inicio
-        tiempo_str = str(duracion).split(".")[0]
-        cronometro.info(f"⏱️ Tiempo transcurrido: `{tiempo_str}`")
+        ahora = datetime.now(tz)
+        duracion_segundos = int((ahora - inicio).total_seconds())
+        duracion = str(timedelta(seconds=duracion_segundos))
 
-        # Forzar actualización cada segundo
-        st.experimental_rerun()
+        st.success(f"📍 Ubicando: `{objeto}`")
+        st.markdown(f"### 🕒 Tiempo transcurrido: `{duracion}`")
 
-        # Finalización de la ubicación
-        lugar = st.text_input("📌 ¿Dónde quedó ubicado?")
-        if lugar and st.button("⏹ Finalizar ubicación"):
-            fin = datetime.now(tz)
-            col.update_one(
-                {
-                    "objeto": st.session_state["objeto_en_ubicacion"],
-                    "inicio": st.session_state["inicio_ubicacion"],
-                    "fin": None
-                },
-                {
-                    "$set": {
-                        "fin": fin,
-                        "ubicacion": lugar,
-                        "duracion_segundos": (fin - inicio).total_seconds()
-                    }
-                }
-            )
-            st.success("✅ Ubicación finalizada.")
-            for key in ["fase", "objeto_en_ubicacion", "inicio_ubicacion", "imagen_b64"]:
-                st.session_state[key] = None
+        lugar = st.text_input(f"📌 ¿Dónde quedó ubicado **{objeto}**?", key=f"ubicacion_{objeto}")
+        if lugar and st.button("⏹️ Finalizar ubicación"):
+            db["ubicaciones_migracion"].insert_one({
+                "objeto": objeto,
+                "ubicacion": lugar,
+                "duracion_segundos": duracion_segundos,
+                "inicio": inicio,
+                "fin": ahora,
+                "imagen_b64": st.session_state["imagen_b64"]
+            })
+
+            orden = st.session_state["orden_confirmado"]
+            if objeto in orden:
+                orden.remove(objeto)
+
+            if orden:
+                st.session_state["orden_confirmado"] = orden
+                st.session_state["fase"] = "espera_inicio"
+                st.toast(f"✅ {objeto} ubicado en {lugar} — {duracion}")
+            else:
+                st.success("🎉 Todos los objetos fueron ubicados.")
+                st.balloons()
+                for k in estado_inicial.keys():
+                    st.session_state.pop(k, None)
+
             st.rerun()
 
 # === TAB HISTORIAL ===
