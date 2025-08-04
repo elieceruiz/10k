@@ -2,5 +2,4 @@ streamlit
 pymongo
 openai
 pillow
-python-dotenv
 pytz
