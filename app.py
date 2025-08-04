@@ -63,164 +63,98 @@ tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección",
 with tab_migracion:
     st.subheader("🧪 Captura con cámara (fluida y ligera)")
 
-    # Inicializar sesión si no está lista
-    if "inicio_espera_foto" not in st.session_state:
-        st.session_state.update({
-            "inicio_espera_foto": time.time(),
-            "foto_cargada": False,
-            "mostrar_resultado": False,
-            "imagen_para_mostrar": None,
-            "imagen_b64": None,
-            "objetos_detectados": [],
-            "orden_confirmado": False,
-            "tareas_zen": [],
-            "indice_actual": 0,
-            "cronometro_inicio": None,
-            "tiempos_zen": [],
-            "mongo_id": None
-        })
+    # Inicialización de estado
+    claves = [
+        "inicio_espera_foto", "foto_cargada", "imagen_b64", "imagen_para_mostrar",
+        "tiempo_carga", "tiempo_analisis", "objetos_detectados", "seleccionados_zen"
+    ]
+    for clave in claves:
+        if clave not in st.session_state:
+            st.session_state[clave] = None if "seleccionados" not in clave else []
 
-    archivo = st.file_uploader(
-        label="📷 Toca para tomar foto (usa cámara móvil)",
-        type=["jpg", "jpeg", "png"],
-        label_visibility="collapsed",
-        key="migracion_uploader_fluido"
-    )
-
-    if archivo and not st.session_state["foto_cargada"]:
-        tiempo_carga = round(time.time() - st.session_state["inicio_espera_foto"], 2)
-        imagen = Image.open(archivo)
-        imagen_reducida = reducir_imagen(imagen)
-        imagen_b64 = convertir_imagen_base64(imagen_reducida)
-
-        # Análisis GPT-4o automático
-        with st.spinner("🔍 Analizando imagen con GPT-4o..."):
-            try:
-                inicio_api = time.time()
-                b64_img = "data:image/jpeg;base64," + imagen_b64
-                respuesta = openai.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "user", "content": [
-                            {"type": "text", "text": "Detecta solo objetos visibles. Devuelve una lista clara, sin contexto extra."},
-                            {"type": "image_url", "image_url": {"url": b64_img}}
-                        ]}
-                    ],
-                    max_tokens=300
-                )
-                tiempo_api = round(time.time() - inicio_api, 2)
-
-                contenido = respuesta.choices[0].message.content
-                objetos = [obj.strip("-• ").capitalize() for obj in contenido.split("\n") if obj.strip()]
-
-                doc = {
-                    "timestamp": datetime.now(tz),
-                    "objetos": objetos,
-                    "imagen_b64": imagen_b64,
-                    "tiempo_total_segundos": tiempo_carga + tiempo_api,
-                    "tiempo_espera_previo": tiempo_carga,
-                    "tiempo_analisis_api": tiempo_api,
-                    "fuente": "migracion"
-                }
-                inserted = col.insert_one(doc)
-
-                # Actualizar estado
-                st.session_state.update({
-                    "foto_cargada": True,
-                    "imagen_para_mostrar": imagen,
-                    "imagen_b64": imagen_b64,
-                    "objetos_detectados": objetos,
-                    "mostrar_resultado": True,
-                    "tiempo_carga": tiempo_carga,
-                    "tiempo_analisis": tiempo_api,
-                    "mongo_id": inserted.inserted_id
-                })
-                st.rerun()
-
-            except Exception as e:
-                st.error(f"❌ Error al analizar imagen: {e}")
-
-    if st.session_state["mostrar_resultado"]:
-        st.image(st.session_state["imagen_para_mostrar"], caption="✅ Foto cargada", use_container_width=True)
-        st.info(f"⏱️ Tiempo desde entrada hasta carga: {st.session_state['tiempo_carga']} segundos")
-        st.success(f"🧠 Análisis GPT-4o: {st.session_state['tiempo_analisis']} segundos")
-        st.markdown("### 📋 Elige el orden de ejecución:")
-
-        seleccionados = st.multiselect(
-            "Selecciona y organiza las tareas detectadas:",
-            options=st.session_state["objetos_detectados"],
-            default=st.session_state["objetos_detectados"]
+    # Mostrar uploader solo si aún no se cargó imagen
+    if not st.session_state["foto_cargada"]:
+        st.session_state["inicio_espera_foto"] = time.time()
+        archivo = st.file_uploader(
+            label="📷 Toca para tomar foto (usa cámara móvil)",
+            type=["jpg", "jpeg", "png"],
+            label_visibility="collapsed",
+            key="migracion_uploader_fluido"
         )
 
-        if seleccionados and not st.session_state["orden_confirmado"]:
-            if st.button("✅ Confirmar orden"):
-                st.session_state["orden_confirmado"] = True
-                st.session_state["tareas_zen"] = seleccionados
-                st.rerun()
+        if archivo:
+            tiempo_carga = round(time.time() - st.session_state["inicio_espera_foto"], 2)
+            imagen = Image.open(archivo)
+            imagen_reducida = reducir_imagen(imagen)
+            imagen_b64 = convertir_imagen_base64(imagen_reducida)
 
-    # === MODO ZEN ===
-    if st.session_state["orden_confirmado"]:
-        idx = st.session_state["indice_actual"]
-        tareas = st.session_state["tareas_zen"]
+            # Llamar de una a GPT-4o
+            with st.spinner("🔍 Analizando imagen..."):
+                try:
+                    inicio_analisis = time.time()
+                    respuesta = openai.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[
+                            {"role": "user", "content": [
+                                {"type": "text", "text": "Detecta solo objetos visibles. Devuelve una lista clara, sin contexto extra."},
+                                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + imagen_b64}}
+                            ]}
+                        ],
+                        max_tokens=300
+                    )
+                    tiempo_analisis = round(time.time() - inicio_analisis, 2)
+                    contenido = respuesta.choices[0].message.content
+                    objetos = [obj.strip("-• ").capitalize() for obj in contenido.split("\n") if obj.strip()]
 
-        if idx < len(tareas):
-            tarea = tareas[idx]
-            st.header(f"🧘 Tarea {idx + 1} de {len(tareas)}: {tarea}")
+                    # Guardar todo en sesión
+                    st.session_state["imagen_para_mostrar"] = imagen
+                    st.session_state["imagen_b64"] = imagen_b64
+                    st.session_state["tiempo_carga"] = tiempo_carga
+                    st.session_state["tiempo_analisis"] = tiempo_analisis
+                    st.session_state["objetos_detectados"] = objetos
+                    st.session_state["foto_cargada"] = True
+                    st.session_state["seleccionados_zen"] = []
 
-            if st.session_state["cronometro_inicio"] is None:
-                if st.button("🎯 Empezar tarea"):
-                    st.session_state["cronometro_inicio"] = datetime.now(tz)
+                    # Registrar en Mongo
+                    col.insert_one({
+                        "timestamp": datetime.now(tz),
+                        "objetos": objetos,
+                        "imagen_b64": imagen_b64,
+                        "tiempo_total_segundos": tiempo_carga + tiempo_analisis,
+                        "tiempo_espera_previo": tiempo_carga,
+                        "tiempo_analisis_api": tiempo_analisis,
+                        "fuente": "migracion"
+                    })
+
                     st.rerun()
-            else:
-                cronometro_placeholder = st.empty()
-                stop_button = st.button("✅ Tarea completada", key=f"done_{idx}")
 
-                while True:
-                    ahora = datetime.now(tz)
-                    delta = ahora - st.session_state["cronometro_inicio"]
-                    cronometro_placeholder.info(f"⏱ Tiempo: {str(delta).split('.')[0]}")
-                    time.sleep(1)
+                except Exception as e:
+                    st.error(f"❌ Error al analizar imagen: {e}")
 
-                    if stop_button:
-                        fin = datetime.now(tz)
-                        ubicacion = st.text_input("📍 ¿Dónde quedó ubicado este objeto?", key=f"ubicacion_{idx}")
+    # Mostrar resultados en contenedor plegable
+    if st.session_state["foto_cargada"]:
+        with st.expander("📋 Sesión activa – Detalles de captura", expanded=True):
+            st.image(st.session_state["imagen_para_mostrar"], caption="✅ Foto cargada", use_container_width=True)
+            st.info(f"⏱ Tiempo hasta carga: {st.session_state['tiempo_carga']} s")
+            st.success(f"🧠 Análisis GPT-4o: {st.session_state['tiempo_analisis']} s")
 
-                        if ubicacion:
-                            st.session_state["tiempos_zen"].append({
-                                "nombre": tarea,
-                                "tiempo_inicio": st.session_state["cronometro_inicio"].isoformat(),
-                                "tiempo_fin": fin.isoformat(),
-                                "duracion_segundos": (fin - st.session_state["cronometro_inicio"]).total_seconds(),
-                                "ubicacion": ubicacion
-                            })
+            st.markdown("### 🪄 Elige elementos para trabajar:")
+            seleccion = st.multiselect(
+                label="Selecciona uno o más objetos detectados:",
+                options=st.session_state["objetos_detectados"],
+                default=st.session_state["seleccionados_zen"]
+            )
+            st.session_state["seleccionados_zen"] = seleccion
 
-                            # Guardar ubicación
-                            db["ubicaciones_zen"].insert_one({
-                                "timestamp": datetime.now(tz),
-                                "objeto": tarea,
-                                "ubicacion": ubicacion
-                            })
+            if seleccion:
+                st.markdown("### ✅ Elementos seleccionados:")
+                for i, obj in enumerate(seleccion, 1):
+                    st.write(f"{i}. {obj}")
 
-                            st.session_state["indice_actual"] += 1
-                            st.session_state["cronometro_inicio"] = None
-                            st.rerun()
-                        else:
-                            st.warning("❗ Especifica la ubicación antes de continuar.")
-                    break
-
-        else:
-            st.success("🎉 Sesión completa. Todos los tiempos registrados.")
-            if st.session_state["mongo_id"]:
-                col.update_one(
-                    {"_id": st.session_state["mongo_id"]},
-                    {"$set": {"tiempos_zen": st.session_state["tiempos_zen"]}}
-                )
-            st.info("♻️ Reiniciando para nueva sesión...")
-            time.sleep(2)
-            for key in list(st.session_state.keys()):
-                if key not in ["mongo_uri", "openai_api_key"]:
-                    del st.session_state[key]
-            st.rerun()
+            # (Opcional: botón para avanzar a modo Zen)
+            if seleccion and st.button("🧘 Empezar modo Zen"):
+                # Aquí puedes activar lógica tipo "Seguimiento de Actividades"
+                st.success("Modo Zen activado (lógica por integrar)")
 
 # === TAB 1: DETECCIÓN ===
 with tab1:
