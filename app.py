@@ -64,53 +64,61 @@ with tab_migracion:
     st.subheader("🧪 Captura con cámara (fluida y ligera)")
 
     archivo = st.file_uploader(
-        "📷 Toca aquí para tomar una foto (usa la cámara en móvil)",
-        type=["jpg"],
-        accept_multiple_files=False,
+        label="📷 Toca para tomar foto (usa cámara móvil)",
+        type=["jpg", "jpeg", "png"],
         label_visibility="collapsed",
-        key=st.session_state.get("migracion_uploader_key", "migracion_uploader_0")
+        key="migracion_uploader_fluido"
     )
 
-    if archivo and "imagen_migracion" not in st.session_state:
-        st.session_state.imagen_migracion = Image.open(archivo)
-        st.session_state.migracion_tiempo_inicio = time.time()
-        st.session_state.objetos_migracion = None
-        st.session_state.migracion_duracion = None
-        st.session_state.migracion_uploader_key = f"migracion_uploader_{time.time()}"
-        st.rerun()
+    if archivo:
+        # — Inicia conteo de tiempo para carga de imagen —
+        inicio_carga = time.time()
 
-    if st.session_state.get("imagen_migracion") and not st.session_state.get("objetos_migracion"):
-        st.image(st.session_state.imagen_migracion, caption="✅ Foto tomada", use_container_width=True)
+        imagen = Image.open(archivo)
+        imagen_reducida = reducir_imagen(imagen)
+        imagen_b64 = convertir_imagen_base64(imagen_reducida)
+
+        fin_carga = time.time()
+        duracion_carga = round(fin_carga - inicio_carga, 2)
+
+        # — Mostrar imagen cargada —
+        st.image(imagen, caption="✅ Foto tomada", use_container_width=True)
+
+        # — Botón para análisis —
         if st.button("🔍 Analizar con GPT-4o"):
-            with st.spinner("Analizando imagen con GPT-4o..."):
-                b64_img = "data:image/jpeg;base64," + convertir_imagen_base64(reducir_imagen(st.session_state.imagen_migracion))
+            with st.spinner("Analizando imagen..."):
+                inicio_analisis = time.time()
+
                 try:
+                    b64_img = "data:image/jpeg;base64," + imagen_b64
                     respuesta = openai.chat.completions.create(
                         model="gpt-4o",
                         messages=[
                             {"role": "user", "content": [
-                                {"type": "text", "text": "Detecta solo objetos visibles. Devuelve una lista clara y concisa."},
+                                {"type": "text", "text": "Detecta solo objetos visibles. Devuelve una lista clara, sin contexto extra."},
                                 {"type": "image_url", "image_url": {"url": b64_img}}
                             ]}
                         ],
-                        max_tokens=300,
+                        max_tokens=300
                     )
+                    fin_analisis = time.time()
+                    duracion_analisis = round(fin_analisis - inicio_analisis, 2)
+
+                    # — Procesar objetos —
                     contenido = respuesta.choices[0].message.content
-                    objetos = [o.strip("-• ").capitalize() for o in contenido.split("\n") if o.strip()]
-                    st.session_state.objetos_migracion = objetos
-                    st.session_state.migracion_duracion = round(time.time() - st.session_state.migracion_tiempo_inicio, 1)
-                    st.session_state.imagen_migracion = None
-                    st.rerun()
+                    objetos = [obj.strip("-• ").capitalize() for obj in contenido.split("\n") if obj.strip()]
+
+                    # — Mostrar resultados minimalistas —
+                    st.success(f"✅ Objetos detectados en {duracion_analisis} segundos")
+                    st.json(objetos)
+                    st.info(f"🖼 Tiempo desde carga hasta mostrar imagen: {duracion_carga} segundos")
+
+                    st.markdown("### 📋 Lista de objetos detectados:")
+                    for obj in objetos:
+                        st.checkbox(obj, value=False, disabled=True)
+
                 except Exception as e:
-                    st.error(f"❌ Error: {e}")
-
-    if st.session_state.get("objetos_migracion"):
-        st.success(f"✅ Objetos detectados en {st.session_state.migracion_duracion} segundos")
-        st.json(st.session_state.objetos_migracion)
-
-        st.markdown("**📋 Lista de objetos detectados:**")
-        for i, obj in enumerate(st.session_state.objetos_migracion, 1):
-            st.checkbox(f"{i}. {obj}", value=False, disabled=True, key=f"chk_migracion_{i}")
+                    st.error(f"❌ Error al analizar imagen: {e}")
 
 # === TAB 1: DETECCIÓN ===
 with tab1:
