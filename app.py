@@ -59,95 +59,12 @@ st.progress(progreso)
 # === PESTAÑAS ===
 tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección", "⏱️ Tiempo en vivo", "📚 Historial"])
 
-# === TAB MIGRACIÓN ===
 with tab_migracion:
     st.subheader("🧪 Captura con cámara (fluida y ligera)")
 
     # Capturar el tiempo de entrada a la pestaña
     if "inicio_espera_foto" not in st.session_state:
-        st.session_state["inicio_espera_foto"] = time.time()
-        st.session_state["foto_cargada"] = False
-        st.session_state["mostrar_resultado"] = False
-        st.session_state["objetos_detectados"] = []
-        st.session_state["imagen_para_mostrar"] = None
-
-    archivo = st.file_uploader(
-        label="📷 Toca para tomar foto (usa cámara móvil)",
-        type=["jpg", "jpeg", "png"],
-        label_visibility="collapsed",
-        key="migracion_uploader_fluido"
-    )
-
-    if archivo and not st.session_state["foto_cargada"]:
-        tiempo_carga = round(time.time() - st.session_state["inicio_espera_foto"], 2)
-        imagen = Image.open(archivo)
-        imagen_reducida = reducir_imagen(imagen)
-        imagen_b64 = convertir_imagen_base64(imagen_reducida)
-
-        st.session_state["imagen_para_mostrar"] = imagen
-        st.session_state["imagen_b64"] = imagen_b64
-        st.session_state["tiempo_carga"] = tiempo_carga
-        st.session_state["foto_cargada"] = True
-        st.rerun()
-
-    if st.session_state["foto_cargada"] and st.session_state["imagen_para_mostrar"]:
-        st.image(st.session_state["imagen_para_mostrar"], caption="✅ Foto cargada", use_container_width=True)
-        st.info(f"⏱️ Tiempo desde entrada hasta carga: {st.session_state['tiempo_carga']} segundos")
-
-        if st.button("🔍 Analizar con GPT-4o"):
-            with st.spinner("🔍 Enviando imagen a GPT-4o..."):
-                inicio_analisis = time.time()
-
-                try:
-                    b64_img = "data:image/jpeg;base64," + st.session_state["imagen_b64"]
-                    respuesta = openai.chat.completions.create(
-                        model="gpt-4o",
-                        messages=[
-                            {"role": "user", "content": [
-                                {"type": "text", "text": "Detecta solo objetos visibles. Devuelve una lista clara, sin contexto extra."},
-                                {"type": "image_url", "image_url": {"url": b64_img}}
-                            ]}
-                        ],
-                        max_tokens=300
-                    )
-                    tiempo_analisis = round(time.time() - inicio_analisis, 2)
-
-                    contenido = respuesta.choices[0].message.content
-                    objetos = [obj.strip("-• ").capitalize() for obj in contenido.split("\n") if obj.strip()]
-
-                    st.session_state["objetos_detectados"] = objetos
-                    st.session_state["mostrar_resultado"] = True
-                    st.session_state["tiempo_analisis"] = tiempo_analisis
-
-                    # Guardar en MongoDB
-                    col.insert_one({
-                        "timestamp": datetime.now(tz),
-                        "objetos": objetos,
-                        "imagen_b64": st.session_state["imagen_b64"],
-                        "tiempo_total_segundos": st.session_state["tiempo_carga"] + tiempo_analisis,
-                        "tiempo_espera_previo": st.session_state["tiempo_carga"],
-                        "tiempo_analisis_api": tiempo_analisis,
-                        "fuente": "migracion"
-                    })
-
-                    st.rerun()
-
-                except Exception as e:
-                    st.error(f"❌ Error al analizar imagen: {e}")
-
-    if st.session_state.get("mostrar_resultado"):
-        st.success(f"🧠 Análisis GPT-4o: {st.session_state['tiempo_analisis']} segundos")
-        st.json(st.session_state["objetos_detectados"])
-        st.markdown("### 📋 Lista de objetos detectados:")
-        for obj in st.session_state["objetos_detectados"]:
-            st.checkbox(obj, value=False, disabled=True)
-
-        # Reset completo si se desea repetir (opcional botón de reinicio)
-        if st.button("🔄 Nueva captura"):
-            for key in ["inicio_espera_foto", "foto_cargada", "mostrar_resultado", "objetos_detectados", "imagen_para_mostrar", "imagen_b64", "tiempo_carga", "tiempo_analisis"]:
-                if key in st.session_state:
-                    del st.session_state[key]
-            st.rerun()
+        st.session_state["inicio_espera_foto
 
 # === TAB 1: DETECCIÓN ===
 with tab1:
