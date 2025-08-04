@@ -63,24 +63,23 @@ tab_migracion, tab1, tab2, tab3 = st.tabs(["🧪 Migración", "🔍 Detección",
 with tab_migracion:
     st.subheader("🧪 Captura con cámara (fluida y ligera)")
 
-    # Inicialización de estado
+    # Inicializar estado
     claves = [
         "inicio_espera_foto", "foto_cargada", "imagen_b64", "imagen_para_mostrar",
-        "tiempo_carga", "tiempo_analisis", "objetos_detectados", "seleccionados_zen"
+        "tiempo_carga", "tiempo_analisis", "objetos_detectados", "orden_seleccionado",
+        "modo_cronometro", "cronometro_inicio", "indice_actual_zen", "ubicaciones_zen"
     ]
     for clave in claves:
         if clave not in st.session_state:
-            st.session_state[clave] = None if "seleccionados" not in clave else []
+            st.session_state[clave] = [] if "orden" in clave or "ubicaciones" in clave else None
 
-    # Mostrar uploader solo si aún no se cargó imagen
+    # MONGO para ubicación
+    col_ubicaciones = db["registro_ubicaciones"]
+
+    # PASO 1: Cargar imagen
     if not st.session_state["foto_cargada"]:
         st.session_state["inicio_espera_foto"] = time.time()
-        archivo = st.file_uploader(
-            label="📷 Toca para tomar foto (usa cámara móvil)",
-            type=["jpg", "jpeg", "png"],
-            label_visibility="collapsed",
-            key="migracion_uploader_fluido"
-        )
+        archivo = st.file_uploader("📷 Toca para tomar foto (usa cámara móvil)", type=["jpg", "jpeg", "png"], label_visibility="collapsed", key="migracion_uploader_fluido")
 
         if archivo:
             tiempo_carga = round(time.time() - st.session_state["inicio_espera_foto"], 2)
@@ -88,7 +87,7 @@ with tab_migracion:
             imagen_reducida = reducir_imagen(imagen)
             imagen_b64 = convertir_imagen_base64(imagen_reducida)
 
-            # Llamar de una a GPT-4o
+            # GPT-4o directo
             with st.spinner("🔍 Analizando imagen..."):
                 try:
                     inicio_analisis = time.time()
@@ -106,55 +105,92 @@ with tab_migracion:
                     contenido = respuesta.choices[0].message.content
                     objetos = [obj.strip("-• ").capitalize() for obj in contenido.split("\n") if obj.strip()]
 
-                    # Guardar todo en sesión
-                    st.session_state["imagen_para_mostrar"] = imagen
-                    st.session_state["imagen_b64"] = imagen_b64
-                    st.session_state["tiempo_carga"] = tiempo_carga
-                    st.session_state["tiempo_analisis"] = tiempo_analisis
-                    st.session_state["objetos_detectados"] = objetos
-                    st.session_state["foto_cargada"] = True
-                    st.session_state["seleccionados_zen"] = []
-
-                    # Registrar en Mongo
-                    col.insert_one({
-                        "timestamp": datetime.now(tz),
-                        "objetos": objetos,
+                    st.session_state.update({
+                        "imagen_para_mostrar": imagen,
                         "imagen_b64": imagen_b64,
-                        "tiempo_total_segundos": tiempo_carga + tiempo_analisis,
-                        "tiempo_espera_previo": tiempo_carga,
-                        "tiempo_analisis_api": tiempo_analisis,
-                        "fuente": "migracion"
+                        "tiempo_carga": tiempo_carga,
+                        "tiempo_analisis": tiempo_analisis,
+                        "objetos_detectados": objetos,
+                        "foto_cargada": True,
+                        "orden_seleccionado": [],
+                        "indice_actual_zen": 0,
+                        "modo_cronometro": False,
+                        "ubicaciones_zen": []
                     })
-
                     st.rerun()
 
                 except Exception as e:
                     st.error(f"❌ Error al analizar imagen: {e}")
 
-    # Mostrar resultados en contenedor plegable
-    if st.session_state["foto_cargada"]:
+    # PASO 2: Mostrar resultados y selección
+    elif not st.session_state["modo_cronometro"]:
         with st.expander("📋 Sesión activa – Detalles de captura", expanded=True):
             st.image(st.session_state["imagen_para_mostrar"], caption="✅ Foto cargada", use_container_width=True)
             st.info(f"⏱ Tiempo hasta carga: {st.session_state['tiempo_carga']} s")
             st.success(f"🧠 Análisis GPT-4o: {st.session_state['tiempo_analisis']} s")
 
-            st.markdown("### 🪄 Elige elementos para trabajar:")
-            seleccion = st.multiselect(
-                label="Selecciona uno o más objetos detectados:",
-                options=st.session_state["objetos_detectados"],
-                default=st.session_state["seleccionados_zen"]
-            )
-            st.session_state["seleccionados_zen"] = seleccion
+            st.markdown("### 🪄 Haz clic en los elementos en el orden que vas a trabajar:")
 
-            if seleccion:
-                st.markdown("### ✅ Elementos seleccionados:")
-                for i, obj in enumerate(seleccion, 1):
-                    st.write(f"{i}. {obj}")
+            for obj in st.session_state["objetos_detectados"]:
+                if obj not in st.session_state["orden_seleccionado"]:
+                    if st.button(obj, key=f"btn_{obj}"):
+                        st.session_state["orden_seleccionado"].append(obj)
+                        st.rerun()
 
-            # (Opcional: botón para avanzar a modo Zen)
-            if seleccion and st.button("🧘 Empezar modo Zen"):
-                # Aquí puedes activar lógica tipo "Seguimiento de Actividades"
-                st.success("Modo Zen activado (lógica por integrar)")
+            if st.session_state["orden_seleccionado"]:
+                st.markdown("### ✅ Orden actual:")
+                for i, item in enumerate(st.session_state["orden_seleccionado"], 1):
+                    st.write(f"{i}. {item}")
+
+                if len(st.session_state["orden_seleccionado"]) >= 1:
+                    if st.button("✅ Confirmar orden y comenzar"):
+                        st.session_state["modo_cronometro"] = True
+                        st.session_state["cronometro_inicio"] = datetime.now(tz)
+                        st.rerun()
+
+    # PASO 3: Modo cronómetro
+    elif st.session_state["modo_cronometro"]:
+        tareas = st.session_state["orden_seleccionado"]
+        idx = st.session_state["indice_actual_zen"]
+
+        if idx < len(tareas):
+            tarea_actual = tareas[idx]
+            st.header(f"🧘 Tarea {idx + 1} de {len(tareas)}: {tarea_actual}")
+
+            ahora = datetime.now(tz)
+            inicio = st.session_state["cronometro_inicio"]
+            transcurrido = str(ahora - inicio).split(".")[0]
+            st.info(f"⏱ Tiempo transcurrido: {transcurrido}")
+
+            if st.button("⏹️ Parar tarea"):
+                st.session_state["duracion_actual"] = (ahora - inicio).total_seconds()
+                st.session_state["cronometro_inicio"] = None
+                st.session_state["esperando_ubicacion"] = True
+                st.rerun()
+
+        elif idx == len(tareas):
+            st.success("🎉 Todas las tareas completadas.")
+            if st.button("🔄 Nueva sesión"):
+                for clave in claves:
+                    st.session_state[clave] = [] if "orden" in clave or "ubicaciones" in clave else None
+                st.rerun()
+
+    # PASO 4: Ingresar ubicación después de parar
+    if st.session_state.get("esperando_ubicacion"):
+        ubicacion = st.text_input("📍 ¿Dónde quedó el elemento?", key="ubicacion_input")
+        if st.button("📥 Guardar ubicación y continuar"):
+            tarea = st.session_state["orden_seleccionado"][st.session_state["indice_actual_zen"]]
+            col_ubicaciones.insert_one({
+                "timestamp": datetime.now(tz),
+                "elemento": tarea,
+                "ubicacion": ubicacion,
+                "duracion_segundos": st.session_state["duracion_actual"]
+            })
+            st.session_state["ubicaciones_zen"].append((tarea, ubicacion))
+            st.session_state["indice_actual_zen"] += 1
+            st.session_state["cronometro_inicio"] = datetime.now(tz)
+            st.session_state["esperando_ubicacion"] = False
+            st.rerun()
 
 # === TAB 1: DETECCIÓN ===
 with tab1:
