@@ -125,7 +125,7 @@ with tab_migracion:
                         st.json(objetos)
                         st.markdown("### 📋 Lista de objetos detectados:")
                         for obj in objetos:
-                            st.checkbox(obj, value=False, disabled=True)
+                            st.checkbox(obj, value=False, key=f"chk_hist_{i}")
                     else:
                         st.warning("⚠️ Respuesta inesperada de GPT-4o. Se esperaba una lista JSON.")
                         st.json(contenido)
