@@ -3,3 +3,4 @@ pymongo
 openai
 pillow
 pytz
+streamlit-autorefresh
