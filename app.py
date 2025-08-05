@@ -5,7 +5,6 @@ import openai
 from pymongo import MongoClient
 import pytz
 from streamlit_javascript import st_javascript
-import time
 
 # === CONFIGURACIÓN ===
 st.set_page_config(page_title="🧠 orden-ador", layout="centered")
@@ -28,14 +27,14 @@ for key, val in {
     if key not in st.session_state:
         st.session_state[key] = val
 
-# === RECUPERAR CRONÓMETRO SI SE REINICIÓ LA APP ===
+# === RESTAURAR CRONÓMETRO SI SE REINICIA LA APP ===
 if not st.session_state["orden_timer_start"]:
     en_curso = historial_col.find_one({"en_ejecucion": True})
     if en_curso:
         st.session_state["orden_en_ejecucion"] = en_curso["ítem"]
         st.session_state["orden_timer_start"] = en_curso["timestamp"]
 
-# === VISIÓN: DETECTAR OBJETOS ===
+# === FUNCIÓN GPT VISIÓN ===
 def detectar_objetos_con_openai(imagen_bytes):
     base64_image = base64.b64encode(imagen_bytes).decode("utf-8")
     response = openai.chat.completions.create(
@@ -65,15 +64,13 @@ if seccion == "💣 Desarrollo":
     if evento:
         hora_inicio = evento["inicio"].astimezone(tz)
         segundos_transcurridos = int((datetime.now(tz) - hora_inicio).total_seconds())
-        st.success(f"🧠 Desarrollo en curso desde las {hora_inicio.strftime('%H:%M:%S')}")
         duracion = str(timedelta(seconds=segundos_transcurridos))
+        st.success(f"🧠 Desarrollo en curso desde las {hora_inicio.strftime('%H:%M:%S')}")
         st.markdown(f"### ⏱️ Duración: `{duracion}`")
         if st.button("⏹️ Finalizar desarrollo"):
             dev_col.update_one({"_id": evento["_id"]}, {"$set": {"fin": datetime.now(tz), "en_curso": False}})
             st.success("✅ Registro finalizado.")
             st.rerun()
-        time.sleep(1)
-        st.rerun()
     else:
         if st.button("🟢 Iniciar desarrollo"):
             dev_col.insert_one({"tipo": "ordenador_dev", "inicio": datetime.now(tz), "en_curso": True})
@@ -128,7 +125,7 @@ elif seccion == "📸 Ordenador":
                 st.session_state[key] = [] if isinstance(st.session_state[key], list) else None
             st.rerun()
 
-    # Paso 4: cronómetro fluido
+    # Paso 4: cronómetro fluido (corregido)
     if st.session_state["orden_en_ejecucion"]:
         actual = st.session_state["orden_en_ejecucion"]
         inicio = st.session_state["orden_timer_start"]
@@ -144,7 +141,10 @@ elif seccion == "📸 Ordenador":
             const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
             const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
             const seconds = String(totalSeconds % 60).padStart(2, '0');
-            document.getElementById("cronovisor").innerText = `\${hours}:\${minutes}:\${seconds}`;
+            const cronovisor = document.getElementById("cronovisor");
+            if (cronovisor) {{
+                cronovisor.innerText = hours + ":" + minutes + ":" + seconds;
+            }}
         }}, 1000);
         """
         st_javascript(js_code)
