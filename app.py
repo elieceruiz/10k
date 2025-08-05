@@ -5,6 +5,7 @@ from pymongo import MongoClient
 import pytz
 import time
 import streamlit as st
+from dateutil.parser import parse
 
 # === CONFIGURACIÓN ===
 st.set_page_config(page_title="🧠 orden-ador", layout="centered")
@@ -31,7 +32,7 @@ for key, val in {
     if key not in st.session_state:
         st.session_state[key] = val
 
-# Función visión
+# === FUNCIÓN DE VISIÓN GPT ===
 def detectar_objetos_con_openai(imagen_bytes):
     base64_image = base64.b64encode(imagen_bytes).decode("utf-8")
     response = openai.chat.completions.create(
@@ -54,7 +55,7 @@ def detectar_objetos_con_openai(imagen_bytes):
 # === INTERFAZ ===
 seccion = st.selectbox("¿Dónde estás trabajando?", ["💣 Desarrollo", "📸 Ordenador", "📂 Historial", "📄 Seguimiento"])
 
-# === OPCIÓN 1: Desarrollo
+# === MÓDULO DESARROLLO
 if seccion == "💣 Desarrollo":
     st.subheader("💣 Tiempo dedicado al desarrollo de orden-ador")
     evento = dev_col.find_one({"tipo": "ordenador_dev", "en_curso": True})
@@ -77,11 +78,11 @@ if seccion == "💣 Desarrollo":
             dev_col.insert_one({"tipo": "ordenador_dev", "inicio": datetime.now(tz), "en_curso": True})
             st.rerun()
 
-# === OPCIÓN 2: Ordenador
+# === MÓDULO ORDENADOR
 elif seccion == "📸 Ordenador":
     st.subheader("📸 Ordenador con visión GPT-4o")
 
-    # 🔄 Recuperar ejecución pendiente si hay una orden activa
+    # Recuperación automática si hay orden activa
     orden_activa = ordenes_confirmadas_col.find_one({"estado": "en_curso"})
     if orden_activa and not st.session_state["orden_en_ejecucion"]:
         completados = orden_activa.get("items_completados", [])
@@ -90,10 +91,13 @@ elif seccion == "📸 Ordenador":
             st.session_state["orden_confirmado"] = True
             st.session_state["orden_asignados"] = pendientes
             st.session_state["orden_en_ejecucion"] = pendientes[0]
-            st.session_state["orden_timer_start"] = orden_activa["inicio"]
+            inicio_val = orden_activa["inicio"]
+            if not isinstance(inicio_val, datetime):
+                inicio_val = parse(inicio_val)
+            st.session_state["orden_timer_start"] = inicio_val
             st.warning(f"⏳ Retomando ejecución pendiente: {pendientes[0]}")
 
-    # Paso 1: Subir imagen y detectar objetos
+    # Subir imagen y detectar objetos
     if not st.session_state["orden_detectados"] and not st.session_state["orden_confirmado"]:
         imagen = st.file_uploader("Subí una imagen", type=["jpg", "jpeg", "png"])
         if imagen:
@@ -102,7 +106,7 @@ elif seccion == "📸 Ordenador":
                 st.session_state["orden_detectados"] = detectados
                 st.success("Detectados: " + ", ".join(detectados))
 
-    # Paso 2: Selección ordenada de objetos
+    # Seleccionar orden de ejecución
     if st.session_state["orden_detectados"] and not st.session_state["orden_confirmado"]:
         seleccionados = st.multiselect(
             "Elegí los objetos en el orden que vas a ejecutar:",
@@ -122,11 +126,10 @@ elif seccion == "📸 Ordenador":
                 "items": seleccionados,
                 "items_completados": [],
             })
-
             st.success(f"Orden confirmada. Iniciando ejecución de: {seleccionados[0]}")
             st.rerun()
 
-    # Paso 4: Cronómetro de ejecución en tiempo real
+    # Cronómetro en tiempo real
     if st.session_state["orden_en_ejecucion"]:
         actual = st.session_state["orden_en_ejecucion"]
         inicio = st.session_state["orden_timer_start"]
@@ -144,13 +147,10 @@ elif seccion == "📸 Ordenador":
                     "duración": duracion,
                     "timestamp": datetime.now(tz),
                 })
-
-                # Actualizar orden en Mongo
                 ordenes_confirmadas_col.update_one(
                     {"estado": "en_curso"},
                     {"$push": {"items_completados": actual}}
                 )
-
                 st.session_state["orden_asignados"].pop(0)
                 if st.session_state["orden_asignados"]:
                     st.session_state["orden_en_ejecucion"] = st.session_state["orden_asignados"][0]
@@ -161,19 +161,16 @@ elif seccion == "📸 Ordenador":
                     st.session_state["orden_confirmado"] = False
                     st.session_state["orden_detectados"] = []
                     ordenes_confirmadas_col.update_one({"estado": "en_curso"}, {"$set": {"estado": "finalizada"}})
-
                 st.success(f"Ítem '{actual}' finalizado en {duracion}.")
                 st.rerun()
-
             duracion = str(timedelta(seconds=i))
             cronometro.markdown(f"### ⏱️ Tiempo transcurrido: {duracion}")
             time.sleep(1)
 
-# === OPCIÓN 3: Historial
+# === HISTORIAL DE EJECUCIONES
 elif seccion == "📂 Historial":
     st.subheader("📂 Historial de ejecución")
 
-    # Historial visión
     st.markdown("### 🧩 Objetos ejecutados con visión")
     registros = list(historial_col.find().sort("timestamp", -1))
     if registros:
@@ -182,16 +179,15 @@ elif seccion == "📂 Historial":
         for i, reg in enumerate(registros):
             fecha = reg["timestamp"].astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
             data_vision.append({
-    "#": total - i,
-    "Ítem": reg.get("ítem", "¿?"),
-    "Duración": reg.get("duración", "N/A"),
-    "Fecha": fecha
-})
+                "#": total - i,
+                "Ítem": reg.get("ítem", "¿?"),
+                "Duración": reg.get("duración", "N/A"),
+                "Fecha": fecha
+            })
         st.dataframe(data_vision, use_container_width=True)
     else:
         st.info("No hay ejecuciones registradas desde la visión.")
 
-    # Historial desarrollo
     st.markdown("### ⌛ Tiempo dedicado al desarrollo")
     sesiones = list(dev_col.find({"en_curso": False}).sort("inicio", -1))
     total_segundos = 0
@@ -215,7 +211,7 @@ elif seccion == "📂 Historial":
     else:
         st.info("No hay sesiones de desarrollo finalizadas.")
 
-# === OPCIÓN 4: Seguimiento
+# === SEGUIMIENTO DE ÓRDENES
 elif seccion == "📄 Seguimiento":
     st.subheader("📄 Seguimiento de órdenes confirmadas")
     ordenes = list(ordenes_confirmadas_col.find().sort("inicio", -1))
