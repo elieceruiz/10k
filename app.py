@@ -51,11 +51,11 @@ def detectar_objetos_con_openai(imagen_bytes):
     return objetos
 
 # === INTERFAZ ===
-seccion = st.selectbox("¿Dónde estás trabajando?", ["⏱ Desarrollo", "📸 Ordenador", "📂 Historial"])
+seccion = st.selectbox("¿Dónde estás trabajando?", ["💣 Desarrollo", "📸 Ordenador", "📂 Historial"])
 
 # === OPCIÓN 1: Desarrollo
-if seccion == "⏱ Desarrollo":
-    st.subheader("⏱ Tiempo dedicado al desarrollo de orden-ador")
+if seccion == "💣 Desarrollo":
+    st.subheader("💣 Tiempo dedicado al desarrollo de orden-ador")
     evento = dev_col.find_one({"tipo": "ordenador_dev", "en_curso": True})
     if evento:
         hora_inicio = evento["inicio"].astimezone(tz)
