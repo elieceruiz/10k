@@ -1,6 +1,5 @@
 streamlit
 pymongo
 openai
-python-dotenv
 pytz
 python-dateutil
