@@ -3,3 +3,4 @@ pymongo
 openai
 pytz
 python-dateutil
+streamlit-javascript
