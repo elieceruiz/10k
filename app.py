@@ -95,10 +95,9 @@ elif seccion == "📸 Ordenador":
         if pendientes:
             st.session_state["orden_confirmado"] = True
             st.session_state["orden_asignados"] = pendientes
-            siguiente = pendientes[0]
-            st.session_state["orden_en_ejecucion"] = siguiente
+            st.session_state["orden_en_ejecucion"] = pendientes[0]
             st.session_state["orden_timer_start"] = to_datetime_local(orden_activa["inicio"])
-            st.warning(f"⏳ Retomando ejecución pendiente: {siguiente}")
+            st.warning(f"⏳ Retomando ejecución pendiente: {pendientes[0]}")
 
     if not st.session_state["orden_detectados"] and not st.session_state["orden_confirmado"]:
         imagen = st.file_uploader("Subí una imagen", type=["jpg", "jpeg", "png"])
@@ -152,31 +151,20 @@ elif seccion == "📸 Ordenador":
                     {"$push": {"items_completados": actual}}
                 )
                 st.session_state["orden_asignados"].pop(0)
-
                 if st.session_state["orden_asignados"]:
-                    st.session_state["orden_en_ejecucion"] = None
-                    st.session_state["orden_timer_start"] = None
-                    st.success(f"Ítem '{actual}' finalizado en {duracion}. Esperando tu confirmación para continuar.")
+                    st.session_state["orden_en_ejecucion"] = st.session_state["orden_asignados"][0]
+                    st.session_state["orden_timer_start"] = datetime.now(tz)
                 else:
                     st.session_state["orden_en_ejecucion"] = None
                     st.session_state["orden_timer_start"] = None
                     st.session_state["orden_confirmado"] = False
                     st.session_state["orden_detectados"] = []
                     ordenes_confirmadas_col.update_one({"estado": "en_curso"}, {"$set": {"estado": "finalizada"}})
-                    st.success(f"✅ Orden completada. Último ítem '{actual}' finalizado en {duracion}.")
+                st.success(f"Ítem '{actual}' finalizado en {duracion}.")
                 st.rerun()
-
             duracion = str(timedelta(seconds=i))
             cronometro.markdown(f"### ⏱️ Tiempo transcurrido: {duracion}")
             time.sleep(1)
-
-    if not st.session_state["orden_en_ejecucion"] and st.session_state["orden_asignados"]:
-        siguiente = st.session_state["orden_asignados"][0]
-        st.info(f"⏸ Ítem listo para ejecutar: **{siguiente}**")
-        if st.button(f"▶️ Iniciar ejecución de: {siguiente}"):
-            st.session_state["orden_en_ejecucion"] = siguiente
-            st.session_state["orden_timer_start"] = datetime.now(tz)
-            st.rerun()
 
 # === HISTORIAL
 elif seccion == "📂 Historial":
