@@ -1,20 +1,21 @@
-import streamlit as st
 from datetime import datetime, timedelta
 import base64
 import openai
 from pymongo import MongoClient
 import pytz
 import time
-from bson import ObjectId
+import streamlit as st
 
 # === CONFIGURACIÓN ===
 st.set_page_config(page_title="🧠 orden-ador", layout="centered")
+
+# Claves desde secrets
 openai.api_key = st.secrets["openai_api_key"]
 client = MongoClient(st.secrets["mongo_uri"])
 db = client["ordenador"]
 historial_col = db["historial"]
 dev_col = db["dev_tracker"]
-tracker_col = db["orden_tracker"]
+ordenes_confirmadas_col = db["ordenes_confirmadas"]
 
 tz = pytz.timezone("America/Bogota")
 
@@ -25,13 +26,12 @@ for key, val in {
     "orden_confirmado": False,
     "orden_asignados": [],
     "orden_en_ejecucion": None,
-    "orden_timer_start": None,
-    "orden_id": None
+    "orden_timer_start": None
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
 
-# === VISIÓN
+# Función visión
 def detectar_objetos_con_openai(imagen_bytes):
     base64_image = base64.b64encode(imagen_bytes).decode("utf-8")
     response = openai.chat.completions.create(
@@ -51,10 +51,10 @@ def detectar_objetos_con_openai(imagen_bytes):
     objetos = [x.strip(" -•0123456789. ") for x in texto.split("\n") if x.strip()]
     return objetos
 
-# === INTERFAZ PRINCIPAL
-seccion = st.selectbox("¿Dónde estás trabajando?", ["💣 Desarrollo", "📸 Ordenador", "📄 Seguimiento", "📂 Historial"])
+# === INTERFAZ ===
+seccion = st.selectbox("¿Dónde estás trabajando?", ["💣 Desarrollo", "📸 Ordenador", "📂 Historial", "📄 Seguimiento"])
 
-# === DESARROLLO
+# === OPCIÓN 1: Desarrollo
 if seccion == "💣 Desarrollo":
     st.subheader("💣 Tiempo dedicado al desarrollo de orden-ador")
     evento = dev_col.find_one({"tipo": "ordenador_dev", "en_curso": True})
@@ -77,12 +77,24 @@ if seccion == "💣 Desarrollo":
             dev_col.insert_one({"tipo": "ordenador_dev", "inicio": datetime.now(tz), "en_curso": True})
             st.rerun()
 
-# === ORDENADOR CON VISIÓN
+# === OPCIÓN 2: Ordenador
 elif seccion == "📸 Ordenador":
     st.subheader("📸 Ordenador con visión GPT-4o")
 
-    # Paso 1: Subir imagen
-    if not st.session_state["orden_detectados"]:
+    # 🔄 Recuperar ejecución pendiente si hay una orden activa
+    orden_activa = ordenes_confirmadas_col.find_one({"estado": "en_curso"})
+    if orden_activa and not st.session_state["orden_en_ejecucion"]:
+        completados = orden_activa.get("items_completados", [])
+        pendientes = [i for i in orden_activa["items"] if i not in completados]
+        if pendientes:
+            st.session_state["orden_confirmado"] = True
+            st.session_state["orden_asignados"] = pendientes
+            st.session_state["orden_en_ejecucion"] = pendientes[0]
+            st.session_state["orden_timer_start"] = orden_activa["inicio"]
+            st.warning(f"⏳ Retomando ejecución pendiente: {pendientes[0]}")
+
+    # Paso 1: Subir imagen y detectar objetos
+    if not st.session_state["orden_detectados"] and not st.session_state["orden_confirmado"]:
         imagen = st.file_uploader("Subí una imagen", type=["jpg", "jpeg", "png"])
         if imagen:
             with st.spinner("Detectando objetos..."):
@@ -90,7 +102,7 @@ elif seccion == "📸 Ordenador":
                 st.session_state["orden_detectados"] = detectados
                 st.success("Detectados: " + ", ".join(detectados))
 
-    # Paso 2: Elegir orden y registrar
+    # Paso 2: Selección ordenada de objetos
     if st.session_state["orden_detectados"] and not st.session_state["orden_confirmado"]:
         seleccionados = st.multiselect(
             "Elegí los objetos en el orden que vas a ejecutar:",
@@ -101,46 +113,20 @@ elif seccion == "📸 Ordenador":
         if seleccionados and st.button("✔️ Confirmar orden de ejecución"):
             st.session_state["orden_asignados"] = seleccionados.copy()
             st.session_state["orden_confirmado"] = True
+            st.session_state["orden_en_ejecucion"] = seleccionados[0]
+            st.session_state["orden_timer_start"] = datetime.now(tz)
 
-            orden_doc = {
-                "orden": seleccionados.copy(),
+            ordenes_confirmadas_col.insert_one({
+                "estado": "en_curso",
                 "inicio": datetime.now(tz),
-                "en_curso": True,
-                "completados": [],
-            }
-            result = tracker_col.insert_one(orden_doc)
-            st.session_state["orden_id"] = result.inserted_id
+                "items": seleccionados,
+                "items_completados": [],
+            })
 
-            st.success("Orden confirmada y registrada. Empezá a ejecutar cada ítem.")
+            st.success(f"Orden confirmada. Iniciando ejecución de: {seleccionados[0]}")
             st.rerun()
 
-    # Paso 3: Iniciar cada ítem
-    if st.session_state["orden_confirmado"] and not st.session_state["orden_en_ejecucion"]:
-        if st.session_state["orden_asignados"]:
-            actual = st.session_state["orden_asignados"][0]
-            st.subheader(f"🎯 Enfoque actual: **{actual}**")
-            if st.button("🚀 Iniciar ejecución"):
-                st.session_state["orden_en_ejecucion"] = actual
-                st.session_state["orden_timer_start"] = datetime.now(tz)
-                st.rerun()
-        else:
-            st.success("✅ Todos los ítems fueron ejecutados.")
-
-            # Marcar en Mongo como completado
-            orden_id = st.session_state.get("orden_id")
-            if orden_id:
-                tracker_col.update_one(
-                    {"_id": ObjectId(orden_id)},
-                    {"$set": {"en_curso": False, "fin": datetime.now(tz)}}
-                )
-
-            # Reset estado
-            for key in ["orden_detectados", "orden_elegidos", "orden_confirmado", "orden_asignados",
-                        "orden_en_ejecucion", "orden_timer_start", "orden_id"]:
-                st.session_state[key] = [] if "list" in str(type(st.session_state[key])) else None
-            st.rerun()
-
-    # Paso 4: Cronómetro y finalización
+    # Paso 4: Cronómetro de ejecución en tiempo real
     if st.session_state["orden_en_ejecucion"]:
         actual = st.session_state["orden_en_ejecucion"]
         inicio = st.session_state["orden_timer_start"]
@@ -159,17 +145,23 @@ elif seccion == "📸 Ordenador":
                     "timestamp": datetime.now(tz),
                 })
 
-                orden_id = st.session_state.get("orden_id")
-                if orden_id:
-                    tracker_col.update_one(
-                        {"_id": ObjectId(orden_id)},
-                        {"$push": {"completados": {"ítem": actual, "duración": duracion, "fin": datetime.now(tz)}},
-                         "$set": {"última_actualización": datetime.now(tz)}}
-                    )
+                # Actualizar orden en Mongo
+                ordenes_confirmadas_col.update_one(
+                    {"estado": "en_curso"},
+                    {"$push": {"items_completados": actual}}
+                )
 
                 st.session_state["orden_asignados"].pop(0)
-                st.session_state["orden_en_ejecucion"] = None
-                st.session_state["orden_timer_start"] = None
+                if st.session_state["orden_asignados"]:
+                    st.session_state["orden_en_ejecucion"] = st.session_state["orden_asignados"][0]
+                    st.session_state["orden_timer_start"] = datetime.now(tz)
+                else:
+                    st.session_state["orden_en_ejecucion"] = None
+                    st.session_state["orden_timer_start"] = None
+                    st.session_state["orden_confirmado"] = False
+                    st.session_state["orden_detectados"] = []
+                    ordenes_confirmadas_col.update_one({"estado": "en_curso"}, {"$set": {"estado": "finalizada"}})
+
                 st.success(f"Ítem '{actual}' finalizado en {duracion}.")
                 st.rerun()
 
@@ -177,33 +169,11 @@ elif seccion == "📸 Ordenador":
             cronometro.markdown(f"### ⏱️ Tiempo transcurrido: {duracion}")
             time.sleep(1)
 
-# === SEGUIMIENTO
-elif seccion == "📄 Seguimiento":
-    st.subheader("📄 Seguimiento de órdenes confirmadas")
-    ordenes = list(tracker_col.find().sort("inicio", -1))
-    if ordenes:
-        data = []
-        for o in ordenes:
-            inicio = o["inicio"].astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
-            fin = o.get("fin", None)
-            completados = len(o.get("completados", []))
-            total = len(o["orden"])
-            estado = "✅ Finalizado" if not o.get("en_curso", False) else "🟡 En curso"
-            progreso = f"{completados}/{total}"
-            data.append({
-                "Estado": estado,
-                "Inicio": inicio,
-                "Progreso": progreso,
-                "Ítems confirmados": ", ".join(o["orden"])
-            })
-        st.dataframe(data, use_container_width=True)
-    else:
-        st.info("No hay órdenes registradas aún.")
-
-# === HISTORIAL
+# === OPCIÓN 3: Historial
 elif seccion == "📂 Historial":
     st.subheader("📂 Historial de ejecución")
 
+    # Historial visión
     st.markdown("### 🧩 Objetos ejecutados con visión")
     registros = list(historial_col.find().sort("timestamp", -1))
     if registros:
@@ -221,6 +191,7 @@ elif seccion == "📂 Historial":
     else:
         st.info("No hay ejecuciones registradas desde la visión.")
 
+    # Historial desarrollo
     st.markdown("### ⌛ Tiempo dedicado al desarrollo")
     sesiones = list(dev_col.find({"en_curso": False}).sort("inicio", -1))
     total_segundos = 0
@@ -243,3 +214,24 @@ elif seccion == "📂 Historial":
         st.markdown(f"**🧠 Total acumulado:** `{str(timedelta(seconds=total_segundos))}`")
     else:
         st.info("No hay sesiones de desarrollo finalizadas.")
+
+# === OPCIÓN 4: Seguimiento
+elif seccion == "📄 Seguimiento":
+    st.subheader("📄 Seguimiento de órdenes confirmadas")
+    ordenes = list(ordenes_confirmadas_col.find().sort("inicio", -1))
+    if ordenes:
+        data = []
+        for o in ordenes:
+            inicio = o["inicio"].astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
+            total = len(o["items"])
+            completados = len(o.get("items_completados", []))
+            estado = "🟡 En curso" if o.get("estado") == "en_curso" else "✅ Finalizado"
+            data.append({
+                "Estado": estado,
+                "Inicio": inicio,
+                "Progreso": f"{completados}/{total}",
+                "Ítems": ", ".join(o["items"])
+            })
+        st.dataframe(data, use_container_width=True)
+    else:
+        st.info("No hay órdenes registradas.")
