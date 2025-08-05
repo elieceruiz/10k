@@ -182,11 +182,11 @@ elif seccion == "📂 Historial":
         for i, reg in enumerate(registros):
             fecha = reg["timestamp"].astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
             data_vision.append({
-                "#": total - i,
-                "Ítem": reg["ítem"],
-                "Duración": reg["duración"],
-                "Fecha": fecha
-            })
+    "#": total - i,
+    "Ítem": reg.get("ítem", "¿?"),
+    "Duración": reg.get("duración", "N/A"),
+    "Fecha": fecha
+})
         st.dataframe(data_vision, use_container_width=True)
     else:
         st.info("No hay ejecuciones registradas desde la visión.")
