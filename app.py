@@ -20,6 +20,12 @@ ordenes_confirmadas_col = db["ordenes_confirmadas"]
 
 tz = pytz.timezone("America/Bogota")
 
+# Utilidad robusta para convertir cualquier valor a datetime local
+def to_datetime_local(dt):
+    if not isinstance(dt, datetime):
+        dt = parse(dt)
+    return dt.astimezone(tz)
+
 # Estado base
 for key, val in {
     "orden_detectados": [],
@@ -60,7 +66,7 @@ if seccion == "💣 Desarrollo":
     st.subheader("💣 Tiempo dedicado al desarrollo de orden-ador")
     evento = dev_col.find_one({"tipo": "ordenador_dev", "en_curso": True})
     if evento:
-        hora_inicio = evento["inicio"].astimezone(tz)
+        hora_inicio = to_datetime_local(evento["inicio"])
         segundos_transcurridos = int((datetime.now(tz) - hora_inicio).total_seconds())
         st.success(f"🧠 Desarrollo en curso desde las {hora_inicio.strftime('%H:%M:%S')}")
         cronometro = st.empty()
@@ -82,7 +88,6 @@ if seccion == "💣 Desarrollo":
 elif seccion == "📸 Ordenador":
     st.subheader("📸 Ordenador con visión GPT-4o")
 
-    # Recuperación automática si hay orden activa
     orden_activa = ordenes_confirmadas_col.find_one({"estado": "en_curso"})
     if orden_activa and not st.session_state["orden_en_ejecucion"]:
         completados = orden_activa.get("items_completados", [])
@@ -91,13 +96,9 @@ elif seccion == "📸 Ordenador":
             st.session_state["orden_confirmado"] = True
             st.session_state["orden_asignados"] = pendientes
             st.session_state["orden_en_ejecucion"] = pendientes[0]
-            inicio_val = orden_activa["inicio"]
-            if not isinstance(inicio_val, datetime):
-                inicio_val = parse(inicio_val)
-            st.session_state["orden_timer_start"] = inicio_val
+            st.session_state["orden_timer_start"] = to_datetime_local(orden_activa["inicio"])
             st.warning(f"⏳ Retomando ejecución pendiente: {pendientes[0]}")
 
-    # Subir imagen y detectar objetos
     if not st.session_state["orden_detectados"] and not st.session_state["orden_confirmado"]:
         imagen = st.file_uploader("Subí una imagen", type=["jpg", "jpeg", "png"])
         if imagen:
@@ -106,7 +107,6 @@ elif seccion == "📸 Ordenador":
                 st.session_state["orden_detectados"] = detectados
                 st.success("Detectados: " + ", ".join(detectados))
 
-    # Seleccionar orden de ejecución
     if st.session_state["orden_detectados"] and not st.session_state["orden_confirmado"]:
         seleccionados = st.multiselect(
             "Elegí los objetos en el orden que vas a ejecutar:",
@@ -129,12 +129,9 @@ elif seccion == "📸 Ordenador":
             st.success(f"Orden confirmada. Iniciando ejecución de: {seleccionados[0]}")
             st.rerun()
 
-    # Cronómetro en tiempo real
     if st.session_state["orden_en_ejecucion"]:
         actual = st.session_state["orden_en_ejecucion"]
-        inicio = st.session_state["orden_timer_start"]
-        if not isinstance(inicio, datetime):
-            inicio = parse(inicio)
+        inicio = to_datetime_local(st.session_state["orden_timer_start"])
         segundos_transcurridos = int((datetime.now(tz) - inicio).total_seconds())
 
         st.success(f"🟢 Ejecutando: {actual}")
@@ -179,7 +176,7 @@ elif seccion == "📂 Historial":
         data_vision = []
         total = len(registros)
         for i, reg in enumerate(registros):
-            fecha = reg["timestamp"].astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
+            fecha = to_datetime_local(reg["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
             data_vision.append({
                 "#": total - i,
                 "Ítem": reg.get("ítem", "¿?"),
@@ -196,8 +193,8 @@ elif seccion == "📂 Historial":
     data_dev = []
     total = len(sesiones)
     for i, sesion in enumerate(sesiones):
-        ini = sesion["inicio"].astimezone(tz)
-        fin = sesion.get("fin", ini).astimezone(tz)
+        ini = to_datetime_local(sesion["inicio"])
+        fin = to_datetime_local(sesion.get("fin", ini))
         segundos = int((fin - ini).total_seconds())
         total_segundos += segundos
         duracion = str(timedelta(seconds=segundos))
@@ -220,7 +217,7 @@ elif seccion == "📄 Seguimiento":
     if ordenes:
         data = []
         for o in ordenes:
-            inicio = o["inicio"].astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
+            inicio = to_datetime_local(o["inicio"]).strftime("%Y-%m-%d %H:%M:%S")
             total = len(o["items"])
             completados = len(o.get("items_completados", []))
             estado = "🟡 En curso" if o.get("estado") == "en_curso" else "✅ Finalizado"
