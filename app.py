@@ -4,6 +4,7 @@ import base64
 import openai
 from pymongo import MongoClient
 import pytz
+from streamlit_javascript import st_javascript
 import time
 
 # === CONFIGURACIÓN ===
@@ -127,18 +128,30 @@ elif seccion == "📸 Ordenador":
                 st.session_state[key] = [] if isinstance(st.session_state[key], list) else None
             st.rerun()
 
-    # Paso 4: cronómetro persistente
+    # Paso 4: cronómetro fluido
     if st.session_state["orden_en_ejecucion"]:
         actual = st.session_state["orden_en_ejecucion"]
         inicio = st.session_state["orden_timer_start"]
-        ahora = datetime.now(tz)
-        segundos_transcurridos = int((ahora - inicio).total_seconds())
-        duracion = str(timedelta(seconds=segundos_transcurridos))
-
         st.success(f"🟢 Ejecutando: {actual}")
-        st.markdown(f"### ⏱️ Tiempo transcurrido: `{duracion}`")
+        st.markdown("### ⏱️ Tiempo transcurrido:")
+        st.markdown('<h2 id="cronovisor">00:00:00</h2>', unsafe_allow_html=True)
+        js_code = f"""
+        const startTime = new Date("{inicio.isoformat()}").getTime();
+        setInterval(() => {{
+            const now = new Date().getTime();
+            const elapsed = now - startTime;
+            const totalSeconds = Math.floor(elapsed / 1000);
+            const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+            const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+            const seconds = String(totalSeconds % 60).padStart(2, '0');
+            document.getElementById("cronovisor").innerText = `\${hours}:\${minutes}:\${seconds}`;
+        }}, 1000);
+        """
+        st_javascript(js_code)
 
         if st.button("✅ Finalizar este ítem"):
+            ahora = datetime.now(tz)
+            duracion = str(timedelta(seconds=int((ahora - inicio).total_seconds())))
             historial_col.update_one(
                 {"ítem": actual, "en_ejecucion": True},
                 {"$set": {
@@ -152,15 +165,11 @@ elif seccion == "📸 Ordenador":
             st.session_state["orden_timer_start"] = None
             st.success(f"Ítem '{actual}' finalizado en {duracion}.")
             st.rerun()
-        else:
-            time.sleep(1)
-            st.rerun()
 
 # === OPCIÓN 3: HISTORIAL
 elif seccion == "📂 Historial":
     st.subheader("📂 Historial de ejecución")
 
-    # Historial visión
     st.markdown("### 🧩 Objetos ejecutados con visión")
     registros = list(historial_col.find({"en_ejecucion": False}).sort("timestamp_fin", -1))
     if registros:
@@ -178,7 +187,6 @@ elif seccion == "📂 Historial":
     else:
         st.info("No hay ejecuciones registradas desde la visión.")
 
-    # Historial desarrollo
     st.markdown("### ⌛ Tiempo dedicado al desarrollo")
     sesiones = list(dev_col.find({"en_curso": False}).sort("inicio", -1))
     total_segundos = 0
