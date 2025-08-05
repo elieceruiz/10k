@@ -4,18 +4,21 @@ import base64
 import openai
 from pymongo import MongoClient
 import pytz
-from streamlit_javascript import st_javascript
+import time
 
 # === CONFIGURACIÓN ===
 st.set_page_config(page_title="🧠 orden-ador", layout="centered")
+
+# Claves desde secrets
 openai.api_key = st.secrets["openai_api_key"]
 client = MongoClient(st.secrets["mongo_uri"])
 db = client["ordenador"]
 historial_col = db["historial"]
 dev_col = db["dev_tracker"]
+
 tz = pytz.timezone("America/Bogota")
 
-# === ESTADO BASE ===
+# Estado base
 for key, val in {
     "orden_detectados": [],
     "orden_elegidos": [],
@@ -27,14 +30,7 @@ for key, val in {
     if key not in st.session_state:
         st.session_state[key] = val
 
-# === RESTAURAR CRONÓMETRO SI SE REINICIA LA APP ===
-if not st.session_state["orden_timer_start"]:
-    en_curso = historial_col.find_one({"en_ejecucion": True})
-    if en_curso:
-        st.session_state["orden_en_ejecucion"] = en_curso["ítem"]
-        st.session_state["orden_timer_start"] = en_curso["timestamp"]
-
-# === FUNCIÓN GPT VISIÓN ===
+# Función visión
 def detectar_objetos_con_openai(imagen_bytes):
     base64_image = base64.b64encode(imagen_bytes).decode("utf-8")
     response = openai.chat.completions.create(
@@ -57,30 +53,34 @@ def detectar_objetos_con_openai(imagen_bytes):
 # === INTERFAZ ===
 seccion = st.selectbox("¿Dónde estás trabajando?", ["💣 Desarrollo", "📸 Ordenador", "📂 Historial"])
 
-# === OPCIÓN 1: DESARROLLO
+# === OPCIÓN 1: Desarrollo
 if seccion == "💣 Desarrollo":
     st.subheader("💣 Tiempo dedicado al desarrollo de orden-ador")
     evento = dev_col.find_one({"tipo": "ordenador_dev", "en_curso": True})
     if evento:
         hora_inicio = evento["inicio"].astimezone(tz)
         segundos_transcurridos = int((datetime.now(tz) - hora_inicio).total_seconds())
-        duracion = str(timedelta(seconds=segundos_transcurridos))
         st.success(f"🧠 Desarrollo en curso desde las {hora_inicio.strftime('%H:%M:%S')}")
-        st.markdown(f"### ⏱️ Duración: `{duracion}`")
-        if st.button("⏹️ Finalizar desarrollo"):
-            dev_col.update_one({"_id": evento["_id"]}, {"$set": {"fin": datetime.now(tz), "en_curso": False}})
-            st.success("✅ Registro finalizado.")
-            st.rerun()
+        cronometro = st.empty()
+        stop_button = st.button("⏹️ Finalizar desarrollo")
+        for i in range(segundos_transcurridos, segundos_transcurridos + 100000):
+            if stop_button:
+                dev_col.update_one({"_id": evento["_id"]}, {"$set": {"fin": datetime.now(tz), "en_curso": False}})
+                st.success("✅ Registro finalizado.")
+                st.rerun()
+            duracion = str(timedelta(seconds=i))
+            cronometro.markdown(f"### ⏱️ Duración: {duracion}")
+            time.sleep(1)
     else:
         if st.button("🟢 Iniciar desarrollo"):
             dev_col.insert_one({"tipo": "ordenador_dev", "inicio": datetime.now(tz), "en_curso": True})
             st.rerun()
 
-# === OPCIÓN 2: ORDENADOR
+# === OPCIÓN 2: Ordenador
 elif seccion == "📸 Ordenador":
     st.subheader("📸 Ordenador con visión GPT-4o")
 
-    # Paso 1: subir imagen
+    # Paso 1: Subir imagen y detectar objetos
     if not st.session_state["orden_detectados"]:
         imagen = st.file_uploader("Subí una imagen", type=["jpg", "jpeg", "png"])
         if imagen:
@@ -89,7 +89,7 @@ elif seccion == "📸 Ordenador":
                 st.session_state["orden_detectados"] = detectados
                 st.success("Detectados: " + ", ".join(detectados))
 
-    # Paso 2: seleccionar orden
+    # Paso 2: Selección ordenada de objetos
     if st.session_state["orden_detectados"] and not st.session_state["orden_confirmado"]:
         seleccionados = st.multiselect(
             "Elegí los objetos en el orden que vas a ejecutar:",
@@ -103,80 +103,65 @@ elif seccion == "📸 Ordenador":
             st.success("Orden confirmado. Empezá a ejecutar cada ítem.")
             st.rerun()
 
-    # Paso 3: ejecutar ítems
+    # Paso 3: Ejecución paso a paso
     if st.session_state["orden_confirmado"] and not st.session_state["orden_en_ejecucion"]:
         if st.session_state["orden_asignados"]:
             actual = st.session_state["orden_asignados"][0]
             st.subheader(f"🎯 Enfoque actual: **{actual}**")
             if st.button("🚀 Iniciar ejecución"):
-                inicio = datetime.now(tz)
                 st.session_state["orden_en_ejecucion"] = actual
-                st.session_state["orden_timer_start"] = inicio
-                historial_col.insert_one({
-                    "ítem": actual,
-                    "timestamp": inicio,
-                    "en_ejecucion": True
-                })
+                st.session_state["orden_timer_start"] = datetime.now(tz)
                 st.rerun()
         else:
             st.success("✅ Todos los ítems fueron ejecutados.")
-            for key in ["orden_detectados", "orden_elegidos", "orden_confirmado",
-                        "orden_asignados", "orden_en_ejecucion", "orden_timer_start"]:
-                st.session_state[key] = [] if isinstance(st.session_state[key], list) else None
+            # Reset estado
+            st.session_state["orden_detectados"] = []
+            st.session_state["orden_elegidos"] = []
+            st.session_state["orden_confirmado"] = False
+            st.session_state["orden_asignados"] = []
+            st.session_state["orden_en_ejecucion"] = None
+            st.session_state["orden_timer_start"] = None
             st.rerun()
 
-    # Paso 4: cronómetro fluido (corregido)
+    # Paso 4: Cronómetro de ejecución en tiempo real
     if st.session_state["orden_en_ejecucion"]:
         actual = st.session_state["orden_en_ejecucion"]
         inicio = st.session_state["orden_timer_start"]
+        segundos_transcurridos = int((datetime.now(tz) - inicio).total_seconds())
+
         st.success(f"🟢 Ejecutando: {actual}")
-        st.markdown("### ⏱️ Tiempo transcurrido:")
-        st.markdown('<h2 id="cronovisor">00:00:00</h2>', unsafe_allow_html=True)
-        js_code = f"""
-        const startTime = new Date("{inicio.isoformat()}").getTime();
-        setInterval(() => {{
-            const now = new Date().getTime();
-            const elapsed = now - startTime;
-            const totalSeconds = Math.floor(elapsed / 1000);
-            const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
-            const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
-            const seconds = String(totalSeconds % 60).padStart(2, '0');
-            const cronovisor = document.getElementById("cronovisor");
-            if (cronovisor) {{
-                cronovisor.innerText = hours + ":" + minutes + ":" + seconds;
-            }}
-        }}, 1000);
-        """
-        st_javascript(js_code)
+        cronometro = st.empty()
+        stop_button = st.button("✅ Finalizar este ítem")
 
-        if st.button("✅ Finalizar este ítem"):
-            ahora = datetime.now(tz)
-            duracion = str(timedelta(seconds=int((ahora - inicio).total_seconds())))
-            historial_col.update_one(
-                {"ítem": actual, "en_ejecucion": True},
-                {"$set": {
+        for i in range(segundos_transcurridos, segundos_transcurridos + 100000):
+            if stop_button:
+                duracion = str(timedelta(seconds=i))
+                historial_col.insert_one({
+                    "ítem": actual,
                     "duración": duracion,
-                    "timestamp_fin": ahora,
-                    "en_ejecucion": False
-                }}
-            )
-            st.session_state["orden_asignados"].pop(0)
-            st.session_state["orden_en_ejecucion"] = None
-            st.session_state["orden_timer_start"] = None
-            st.success(f"Ítem '{actual}' finalizado en {duracion}.")
-            st.rerun()
+                    "timestamp": datetime.now(tz),
+                })
+                st.session_state["orden_asignados"].pop(0)
+                st.session_state["orden_en_ejecucion"] = None
+                st.session_state["orden_timer_start"] = None
+                st.success(f"Ítem '{actual}' finalizado en {duracion}.")
+                st.rerun()
+            duracion = str(timedelta(seconds=i))
+            cronometro.markdown(f"### ⏱️ Tiempo transcurrido: {duracion}")
+            time.sleep(1)
 
-# === OPCIÓN 3: HISTORIAL
+# === OPCIÓN 3: Historial
 elif seccion == "📂 Historial":
     st.subheader("📂 Historial de ejecución")
 
+    # Historial visión
     st.markdown("### 🧩 Objetos ejecutados con visión")
-    registros = list(historial_col.find({"en_ejecucion": False}).sort("timestamp_fin", -1))
+    registros = list(historial_col.find().sort("timestamp", -1))
     if registros:
         data_vision = []
         total = len(registros)
         for i, reg in enumerate(registros):
-            fecha = reg["timestamp_fin"].astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
+            fecha = reg["timestamp"].astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
             data_vision.append({
                 "#": total - i,
                 "Ítem": reg["ítem"],
@@ -187,6 +172,7 @@ elif seccion == "📂 Historial":
     else:
         st.info("No hay ejecuciones registradas desde la visión.")
 
+    # Historial desarrollo
     st.markdown("### ⌛ Tiempo dedicado al desarrollo")
     sesiones = list(dev_col.find({"en_curso": False}).sort("inicio", -1))
     total_segundos = 0
