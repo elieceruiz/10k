@@ -133,6 +133,8 @@ elif seccion == "📸 Ordenador":
     if st.session_state["orden_en_ejecucion"]:
         actual = st.session_state["orden_en_ejecucion"]
         inicio = st.session_state["orden_timer_start"]
+        if not isinstance(inicio, datetime):
+            inicio = parse(inicio)
         segundos_transcurridos = int((datetime.now(tz) - inicio).total_seconds())
 
         st.success(f"🟢 Ejecutando: {actual}")
@@ -167,7 +169,7 @@ elif seccion == "📸 Ordenador":
             cronometro.markdown(f"### ⏱️ Tiempo transcurrido: {duracion}")
             time.sleep(1)
 
-# === HISTORIAL DE EJECUCIONES
+# === HISTORIAL
 elif seccion == "📂 Historial":
     st.subheader("📂 Historial de ejecución")
 
@@ -211,7 +213,7 @@ elif seccion == "📂 Historial":
     else:
         st.info("No hay sesiones de desarrollo finalizadas.")
 
-# === SEGUIMIENTO DE ÓRDENES
+# === SEGUIMIENTO
 elif seccion == "📄 Seguimiento":
     st.subheader("📄 Seguimiento de órdenes confirmadas")
     ordenes = list(ordenes_confirmadas_col.find().sort("inicio", -1))
