@@ -101,15 +101,17 @@ elif seccion == "📸 Ordenador":
             st.session_state["orden_asignados"] = seleccionados.copy()
             st.session_state["orden_confirmado"] = True
             st.success("Orden confirmado. Empezá a ejecutar cada ítem.")
+            st.rerun()
 
     # Paso 3: Ejecución paso a paso
     if st.session_state["orden_confirmado"] and not st.session_state["orden_en_ejecucion"]:
         if st.session_state["orden_asignados"]:
-            siguiente = st.session_state["orden_asignados"][0]
-            st.subheader(f"🎯 Enfoque actual: **{siguiente}**")
+            actual = st.session_state["orden_asignados"][0]
+            st.subheader(f"🎯 Enfoque actual: **{actual}**")
             if st.button("🚀 Iniciar ejecución"):
-                st.session_state["orden_en_ejecucion"] = siguiente
+                st.session_state["orden_en_ejecucion"] = actual
                 st.session_state["orden_timer_start"] = datetime.now(tz)
+                st.rerun()
         else:
             st.success("✅ Todos los ítems fueron ejecutados.")
             # Reset estado
@@ -121,23 +123,32 @@ elif seccion == "📸 Ordenador":
             st.session_state["orden_timer_start"] = None
             st.rerun()
 
-    # Paso 4: Cronómetro ejecución
+    # Paso 4: Cronómetro de ejecución en tiempo real
     if st.session_state["orden_en_ejecucion"]:
         actual = st.session_state["orden_en_ejecucion"]
         inicio = st.session_state["orden_timer_start"]
-        tiempo = datetime.now(tz) - inicio
-        st.info(f"🟢 Ejecutando: **{actual}**")
-        st.write(f"⏱ Tiempo transcurrido: {str(tiempo).split('.')[0]}")
-        if st.button("✅ Finalizar este ítem"):
-            historial_col.insert_one({
-                "ítem": actual,
-                "duración": str(tiempo).split(".")[0],
-                "timestamp": datetime.now(tz),
-            })
-            st.session_state["orden_asignados"].pop(0)
-            st.session_state["orden_en_ejecucion"] = None
-            st.session_state["orden_timer_start"] = None
-            st.rerun()
+        segundos_transcurridos = int((datetime.now(tz) - inicio).total_seconds())
+
+        st.success(f"🟢 Ejecutando: {actual}")
+        cronometro = st.empty()
+        stop_button = st.button("✅ Finalizar este ítem")
+
+        for i in range(segundos_transcurridos, segundos_transcurridos + 100000):
+            if stop_button:
+                duracion = str(timedelta(seconds=i))
+                historial_col.insert_one({
+                    "ítem": actual,
+                    "duración": duracion,
+                    "timestamp": datetime.now(tz),
+                })
+                st.session_state["orden_asignados"].pop(0)
+                st.session_state["orden_en_ejecucion"] = None
+                st.session_state["orden_timer_start"] = None
+                st.success(f"Ítem '{actual}' finalizado en {duracion}.")
+                st.rerun()
+            duracion = str(timedelta(seconds=i))
+            cronometro.markdown(f"### ⏱️ Tiempo transcurrido: {duracion}")
+            time.sleep(1)
 
 # === OPCIÓN 3: Historial
 elif seccion == "📂 Historial":
