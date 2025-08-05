@@ -159,10 +159,11 @@ elif seccion == "📂 Historial":
     registros = list(historial_col.find().sort("timestamp", -1))
     if registros:
         data_vision = []
-        for i, reg in enumerate(registros, 1):
+        total = len(registros)
+        for i, reg in enumerate(registros):
             fecha = reg["timestamp"].astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
             data_vision.append({
-                "#": i,
+                "#": total - i,
                 "Ítem": reg["ítem"],
                 "Duración": reg["duración"],
                 "Fecha": fecha
@@ -176,14 +177,15 @@ elif seccion == "📂 Historial":
     sesiones = list(dev_col.find({"en_curso": False}).sort("inicio", -1))
     total_segundos = 0
     data_dev = []
-    for i, sesion in enumerate(sesiones, 1):
+    total = len(sesiones)
+    for i, sesion in enumerate(sesiones):
         ini = sesion["inicio"].astimezone(tz)
         fin = sesion.get("fin", ini).astimezone(tz)
         segundos = int((fin - ini).total_seconds())
         total_segundos += segundos
         duracion = str(timedelta(seconds=segundos))
         data_dev.append({
-            "#": i,
+            "#": total - i,
             "Inicio": ini.strftime("%Y-%m-%d %H:%M:%S"),
             "Fin": fin.strftime("%Y-%m-%d %H:%M:%S"),
             "Duración": duracion
